@@ -1,14 +1,18 @@
 import { existsSync } from 'node:fs'
 import { join, normalize, resolve } from 'node:path'
 import type { ServerWebSocket } from 'bun'
+import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
 import { perform, type Stage, speak } from './performer'
+import { startTwitch, type TwitchHandle } from './twitch'
 import type { StageCue, StageReport } from './types'
 import { voiceHealth } from './voice'
 
 const WEB_DIR = resolve(import.meta.dir, '../web')
 const MAX_CLIPS = 64
+/** Grace after a clip's own length before we stop counting it as "still speaking". */
+const SPOKE_GRACE_MS = 5000
 
 interface Deps {
   cfg: StageConfig
@@ -33,7 +37,10 @@ function serveUnder(root: string, rel: string): Response {
 export function startServer({ cfg, talent, log }: Deps) {
   const clients = new Set<ServerWebSocket<unknown>>()
   const clips = new Map<string, ArrayBuffer>()
+  // Clips announced but not yet reported spoken by a page; expires on its own in case no page does.
+  const pendingSpoke = new Map<string, ReturnType<typeof setTimeout>>()
   let clipSeq = 0
+  let inFlight = 0
   const loadCue: StageCue = { type: 'load', model: `/models/${talent.model}`, talent: talent.name }
 
   const stage: Stage = {
@@ -41,9 +48,13 @@ export function startServer({ cfg, talent, log }: Deps) {
       const msg = JSON.stringify(c)
       for (const ws of clients) ws.send(msg)
     },
-    addClip(wav) {
+    addClip(wav, seconds) {
       const id = `${Date.now().toString(36)}-${(clipSeq++).toString(36)}`
       clips.set(id, wav)
+      pendingSpoke.set(
+        id,
+        setTimeout(() => pendingSpoke.delete(id), seconds * 1000 + SPOKE_GRACE_MS),
+      )
       // Keep memory bounded; a clip is fetched once by each page right after it is announced.
       if (clips.size > MAX_CLIPS) clips.delete(clips.keys().next().value as string)
       return { id, url: `/audio/${id}.wav` }
@@ -51,6 +62,32 @@ export function startServer({ cfg, talent, log }: Deps) {
   }
   const opts = { voiceUrl: cfg.voice.url, talent, stage, log }
   let turn: Promise<unknown> = Promise.resolve()
+  // One turn at a time: the talent has one mouth. Queue behind any turn in progress.
+  const runTurn = async (message: string): Promise<string> => {
+    inFlight++
+    const p = turn.then(() => perform(opts, message))
+    turn = p.catch(() => {})
+    try {
+      return await p
+    } finally {
+      inFlight--
+    }
+  }
+  const isBusy = (): boolean => inFlight > 0 || pendingSpoke.size > 0
+
+  let twitch: TwitchHandle | undefined
+  let batcher: ChatBatcher | undefined
+  if (talent.twitch) {
+    const tw = talent.twitch
+    batcher = new ChatBatcher({ maxBatch: tw.max_batch, isBusy }, (lines, skipped) => {
+      runTurn(formatBatch(tw.channel, lines, skipped))
+        .then((reply) => tw.reply && reply && twitch?.send(reply))
+        .catch((e) => log(`twitch turn failed: ${e}`))
+    })
+    const b = batcher
+    twitch = startTwitch({ cfg: tw, onLine: (l) => b.add(l), log })
+    setInterval(() => b.tick(), tw.interval_ms)
+  }
 
   const server = Bun.serve<unknown>({
     hostname: cfg.server.host,
@@ -80,6 +117,9 @@ export function startServer({ cfg, talent, log }: Deps) {
             model: talent.model,
             pages: clients.size,
             voice,
+            ...(twitch && batcher
+              ? { twitch: { ...twitch.stats(), queued: batcher.size, dropped: batcher.dropped } }
+              : {}),
           })
         }
         return serveUnder(WEB_DIR, path)
@@ -100,11 +140,7 @@ export function startServer({ cfg, talent, log }: Deps) {
         if (path === '/chat') {
           if (typeof body.message !== 'string' || !body.message.trim())
             return json({ error: 'message required' }, 400)
-          // One turn at a time: the talent has one mouth. Queue behind any turn in progress.
-          const p = turn.then(() => perform(opts, body.message as string))
-          turn = p.catch(() => {})
-          const reply = await p
-          return json({ ok: true, reply })
+          return json({ ok: true, reply: await runTurn(body.message) })
         }
         if (path === '/cue') {
           if (typeof body.type !== 'string') return json({ error: 'cue type required' }, 400)
@@ -128,7 +164,11 @@ export function startServer({ cfg, talent, log }: Deps) {
         try {
           r = JSON.parse(String(raw)) as StageReport
         } catch {}
-        if (r?.type === 'spoke') clips.delete(r.id)
+        if (r?.type === 'spoke') {
+          clips.delete(r.id)
+          clearTimeout(pendingSpoke.get(r.id))
+          pendingSpoke.delete(r.id)
+        }
       },
     },
   })

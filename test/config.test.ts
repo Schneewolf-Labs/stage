@@ -33,6 +33,30 @@ describe('parseConfig', () => {
     expect(parseConfig(TOML).talents.b?.egirl_token).toBeUndefined()
   })
 
+  test('parses the optional twitch table with defaults', () => {
+    expect(parseConfig(TOML).talents.a?.twitch).toBeUndefined()
+    const cfg = parseConfig(`${TOML}
+[talents.a.twitch]
+channel = "#NBeerbower"
+ignore = ["NightBot"]
+`)
+    expect(cfg.talents.a?.twitch).toEqual({
+      channel: 'nbeerbower',
+      reply: false,
+      wake_words: ['a'],
+      interval_ms: 4000,
+      max_batch: 6,
+      ignore: ['nightbot'],
+    })
+    expect(() =>
+      parseConfig(`${TOML}
+[talents.a.twitch]
+channel = "x"
+nick = "bot"
+`),
+    ).toThrow(/both nick and token/)
+  })
+
   test('first talent is the default', () => {
     const cfg = parseConfig(TOML)
     expect(pickTalent(cfg).name).toBe('a')
