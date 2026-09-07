@@ -3,6 +3,18 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { parse } from 'smol-toml'
 
+export interface TwitchConfig {
+  channel: string
+  /** Login nick + oauth token. Both or neither; without them Stage reads anonymously and cannot post. */
+  nick?: string
+  token?: string
+  reply: boolean
+  wake_words: string[]
+  interval_ms: number
+  max_batch: number
+  ignore: string[]
+}
+
 export interface TalentConfig {
   name: string
   egirl_url: string
@@ -12,6 +24,7 @@ export interface TalentConfig {
   voice: string
   rvc?: string
   speed: number
+  twitch?: TwitchConfig
 }
 
 export interface StageConfig {
@@ -40,6 +53,39 @@ function num(o: Record<string, unknown>, k: string, fallback: number): number {
   return v
 }
 
+function strList(
+  o: Record<string, unknown>,
+  k: string,
+  where: string,
+  fallback: string[],
+): string[] {
+  const v = o[k] ?? fallback
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string'))
+    throw new Error(`${where}.${k} must be a list of strings`)
+  return v.map((x) => x.toLowerCase())
+}
+
+function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
+  if (raw === undefined) return undefined
+  const w = `talents.${name}.twitch`
+  if (!isObj(raw)) throw new Error(`${w} must be a table`)
+  const nick = typeof raw.nick === 'string' ? raw.nick.toLowerCase() : ''
+  const token = typeof raw.token === 'string' ? expand(raw.token) : ''
+  if ((nick === '') !== (token === ''))
+    throw new Error(`${w}: set both nick and token to post, or neither to read anonymously`)
+  const reply = raw.reply ?? false
+  if (typeof reply !== 'boolean') throw new Error(`${w}.reply must be a boolean`)
+  return {
+    channel: str(raw, 'channel', w).toLowerCase().replace(/^#/, ''),
+    ...(nick ? { nick, token } : {}),
+    reply,
+    wake_words: strList(raw, 'wake_words', w, [name]),
+    interval_ms: num(raw, 'interval_ms', 4000),
+    max_batch: num(raw, 'max_batch', 6),
+    ignore: strList(raw, 'ignore', w, []),
+  }
+}
+
 export function parseConfig(text: string): StageConfig {
   const raw = parse(text)
   const server = isObj(raw.server) ? raw.server : {}
@@ -51,6 +97,7 @@ export function parseConfig(text: string): StageConfig {
     const w = `talents.${name}`
     const token = typeof t.egirl_token === 'string' ? expand(t.egirl_token) : ''
     const rvc = typeof t.rvc === 'string' && t.rvc ? t.rvc : undefined
+    const twitch = parseTwitch(t.twitch, name)
     talents[name] = {
       name,
       egirl_url: str(t, 'egirl_url', w).replace(/\/$/, ''),
@@ -60,6 +107,7 @@ export function parseConfig(text: string): StageConfig {
       voice: str(t, 'voice', w, 'af_heart'),
       ...(rvc ? { rvc } : {}),
       speed: num(t, 'speed', 1.0),
+      ...(twitch ? { twitch } : {}),
     }
   }
   if (Object.keys(talents).length === 0)

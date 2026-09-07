@@ -26,6 +26,18 @@ voice = "af_heart"
 rvc = "egirl"
 speed = 1.0
 
+# Optional: let the talent hear (and answer) a Twitch chat. Remove the table to run without it.
+[talents.springfield.twitch]
+channel = "nbeerbower"
+# Login for posting replies. Leave both out to read anonymously (no posting).
+# nick = "springfield_bot"
+# token = "$TWITCH_OAUTH"          # "oauth:..." from an OAuth flow with the chat:read chat:edit scopes
+reply = false                      # echo the spoken reply into chat
+wake_words = ["springfield"]       # substrings that force an immediate turn; defaults to the talent name
+interval_ms = 4000                 # how often queued chat is considered for a turn
+max_batch = 6                      # most lines sent to egirl per turn; older extras are skipped
+ignore = ["nightbot", "streamelements"]
+
 [talents.kira]
 egirl_url = "http://127.0.0.1:3000"
 egirl_token = "$EGIRL_API_TOKEN"

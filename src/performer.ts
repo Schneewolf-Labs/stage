@@ -7,8 +7,8 @@ import { synthesize } from './voice'
 export interface Stage {
   /** Push a cue to every connected page. */
   cue(c: StageCue): void
-  /** Store a clip and return the URL the page fetches it from. */
-  addClip(wav: ArrayBuffer): { id: string; url: string }
+  /** Store a clip and return the URL the page fetches it from. `seconds` bounds how long it counts as speaking. */
+  addClip(wav: ArrayBuffer, seconds: number): { id: string; url: string }
 }
 
 export interface PerformOptions {
@@ -30,7 +30,7 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   if (!line.text) return
   const t0 = performance.now()
   const clip = await synthesize(voiceUrl, talent, line.text)
-  const { id, url } = stage.addClip(clip.wav)
+  const { id, url } = stage.addClip(clip.wav, clip.seconds)
   stage.cue({ type: 'speak', id, url, text: line.text })
   log?.(
     `spoke ${clip.seconds.toFixed(1)}s in ${((performance.now() - t0) / 1000).toFixed(2)}s: ${line.text}`,

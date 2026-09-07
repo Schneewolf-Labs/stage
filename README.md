@@ -48,6 +48,16 @@ The persona can steer its body with inline tags, which are stripped before synth
 the model's alternate pose. Unknown tags are dropped silently. Add one line to the persona's
 SOUL.md or AGENTS.md telling it these exist.
 
+## Twitch Chat
+
+Add a `[talents.<name>.twitch]` table (see `stage.example.toml`) and the talent listens to that
+channel over Twitch's IRC WebSocket, no extra dependency. Chat is buffered and handed to egirl as
+one message every `interval_ms` while the talent is not already speaking; a line containing a
+wake word triggers a turn right away. Each turn gets the mentioned lines plus the newest others
+up to `max_batch`, and egirl is told how many older lines were skipped. Without `nick` and
+`token` Stage reads anonymously; with them and `reply = true` the spoken reply is also posted to
+chat, cue tags stripped.
+
 ## HTTP API
 
 | Method | Path | Body | Purpose |
@@ -55,7 +65,7 @@ SOUL.md or AGENTS.md telling it these exist.
 | POST | `/chat` | `{message}` | send to the talent's egirl, perform the reply, return `{reply}` |
 | POST | `/say` | `{text}` | speak text directly (cue tags honored), no egirl |
 | POST | `/cue` | a cue object | raw cue passthrough, e.g. `{"type":"mood","mood":"sad"}` |
-| GET | `/health` | | stage + voice service status |
+| GET | `/health` | | stage + voice service status, plus Twitch connection and queue when configured |
 | WS | `/ws` | | what the page listens on |
 
 ## Voice Service
@@ -78,6 +88,8 @@ src/
   config.ts     stage.toml -> typed config (no schema library; the shape is small)
   server.ts     Bun.serve: page, models, clips, HTTP API, WebSocket
   egirl.ts      POST /chat stream consumer (SSE frames)
+  twitch.ts     Twitch IRC over WebSocket: parse, filter, reconnect, optional reply
+  batcher.ts    chat queue -> one egirl turn at a time
   chunker.ts    sentence splitter + cue-tag parser
   performer.ts  egirl events -> voice -> cues
   voice.ts      voice service client
