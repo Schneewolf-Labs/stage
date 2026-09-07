@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs'
-import { join, normalize, resolve } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { dirname, join, normalize, relative, resolve } from 'node:path'
 import type { ServerWebSocket } from 'bun'
 import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
@@ -34,6 +34,29 @@ function serveUnder(root: string, rel: string): Response {
   return new Response(Bun.file(path))
 }
 
+/**
+ * Expression files next to a model. VTube Studio finds `.exp3.json` by scanning the model's
+ * folder (some riggers use an `Exp/` subfolder), and most commissioned model3.json files do not
+ * list them, so scan rather than trust FileReferences.Expressions.
+ */
+function findExpressions(modelsDir: string, model: string): { name: string; url: string }[] {
+  const dir = dirname(resolve(modelsDir, model))
+  const out: { name: string; url: string }[] = []
+  const walk = (d: string, depth: number): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name)
+      if (e.isDirectory() && depth < 2) walk(p, depth + 1)
+      else if (e.name.endsWith('.exp3.json'))
+        out.push({
+          name: e.name.replace(/\.exp3\.json$/, ''),
+          url: `/models/${relative(modelsDir, p)}`,
+        })
+    }
+  }
+  if (existsSync(dir)) walk(dir, 0)
+  return out
+}
+
 export function startServer({ cfg, talent, log }: Deps) {
   const clients = new Set<ServerWebSocket<unknown>>()
   const clips = new Map<string, ArrayBuffer>()
@@ -41,7 +64,13 @@ export function startServer({ cfg, talent, log }: Deps) {
   const pendingSpoke = new Map<string, ReturnType<typeof setTimeout>>()
   let clipSeq = 0
   let inFlight = 0
-  const loadCue: StageCue = { type: 'load', model: `/models/${talent.model}`, talent: talent.name }
+  const expressions = findExpressions(cfg.server.models_dir, talent.model)
+  const loadCue: StageCue = {
+    type: 'load',
+    model: `/models/${talent.model}`,
+    talent: talent.name,
+    expressions,
+  }
 
   const stage: Stage = {
     cue(c) {
@@ -173,5 +202,6 @@ export function startServer({ cfg, talent, log }: Deps) {
     },
   })
   log(`stage for ${talent.name} on http://${cfg.server.host}:${server.port}  model=${talent.model}`)
+  if (expressions.length) log(`expressions: ${expressions.map((e) => e.name).join(', ')}`)
   return server
 }

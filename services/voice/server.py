@@ -1,8 +1,13 @@
 """Voice service: Kokoro-82M text-to-speech with optional RVC voice conversion.
 
-    POST /tts   {"text": "...", "voice": "af_heart", "rvc": "egirl" | null, "speed": 1.0}
-                -> audio/wav (24 kHz mono float)
-    GET  /health -> {"device": ..., "voices": [...], "rvc": [...]}
+    POST /tts      {"text": "...", "voice": "af_heart", "rvc": "egirl" | null, "speed": 1.0, "pitch": 0}
+                   -> audio/wav (24 kHz mono)
+    POST /convert?rvc=egirl&pitch=12   body: a WAV file (any rate, mono or stereo)
+                   -> audio/wav, the same speech in the RVC model's voice. For recorded voiceovers.
+    GET  /health   -> {"device": ..., "rvc": [...], "loaded_rvc": [...]}
+
+`pitch` is semitones of f0 shift into the model: a male voice into a female model usually wants
++12, same-range voices 0.
 
 One request at a time: Kokoro and RVC share the GPU and a sentence takes well under a second, so
 a lock is simpler and no slower than batching. Stage sends one sentence per request so the first
@@ -48,25 +53,39 @@ def load_rvc(name):
     return r
 
 
-def tts(text, voice, rvc, speed):
-    outs = [a for _, _, a in pipeline(text, voice=voice, speed=speed)]
-    audio = np.concatenate([o.numpy() if hasattr(o, 'numpy') else np.asarray(o) for o in outs]).astype(np.float32)
-    if rvc:
-        with tempfile.TemporaryDirectory() as td:
-            src, dst = os.path.join(td, 'in.wav'), os.path.join(td, 'out.wav')
-            sf.write(src, audio, SR)
-            load_rvc(rvc).infer_file(src, dst)
-            audio, sr = sf.read(dst, dtype='float32')
-            if audio.ndim > 1:
-                audio = audio.mean(axis=1)
-            if sr != SR:
-                # RVC emits at the model's native rate; keep the contract simple for the client.
-                import math
-                n = int(math.ceil(len(audio) * SR / sr))
-                audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio).astype(np.float32)
+def to_mono_24k(audio, sr):
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    if sr != SR:
+        n = int(np.ceil(len(audio) * SR / sr))
+        audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio)
+    return audio.astype(np.float32)
+
+
+def convert(audio, sr, rvc, pitch):
+    """Run float audio through an RVC model. rvc-python is file-based, so round-trip via temp files."""
+    with tempfile.TemporaryDirectory() as td:
+        src, dst = os.path.join(td, 'in.wav'), os.path.join(td, 'out.wav')
+        sf.write(src, audio, sr)
+        r = load_rvc(rvc)
+        r.set_params(f0up_key=int(pitch))
+        r.infer_file(src, dst)
+        out, out_sr = sf.read(dst, dtype='float32')
+    return to_mono_24k(out, out_sr)
+
+
+def encode(audio):
     buf = io.BytesIO()
     sf.write(buf, audio, SR, format='WAV', subtype='PCM_16')
     return buf.getvalue(), len(audio) / SR
+
+
+def tts(text, voice, rvc, speed, pitch=0):
+    outs = [a for _, _, a in pipeline(text, voice=voice, speed=speed)]
+    audio = np.concatenate([o.numpy() if hasattr(o, 'numpy') else np.asarray(o) for o in outs]).astype(np.float32)
+    if rvc:
+        audio = convert(audio, SR, rvc, pitch)
+    return encode(audio)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,17 +106,29 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b'{"error":"not found"}')
 
     def do_POST(self):
-        if self.path.rstrip('/') != '/tts':
-            return self._send(404, b'{"error":"not found"}')
+        from urllib.parse import parse_qs, urlparse
+        u = urlparse(self.path)
         n = int(self.headers.get('Content-Length') or 0)
         try:
-            req = json.loads(self.rfile.read(n) or b'{}')
-            text = str(req.get('text', '')).strip()
-            if not text:
-                return self._send(400, b'{"error":"text required"}')
             t0 = time.perf_counter()
-            with lock:
-                wav, dur = tts(text, req.get('voice') or 'af_heart', req.get('rvc') or None, float(req.get('speed') or 1.0))
+            if u.path.rstrip('/') == '/tts':
+                req = json.loads(self.rfile.read(n) or b'{}')
+                text = str(req.get('text', '')).strip()
+                if not text:
+                    return self._send(400, b'{"error":"text required"}')
+                with lock:
+                    wav, dur = tts(text, req.get('voice') or 'af_heart', req.get('rvc') or None,
+                                   float(req.get('speed') or 1.0), int(req.get('pitch') or 0))
+            elif u.path.rstrip('/') == '/convert':
+                q = parse_qs(u.query)
+                rvc = (q.get('rvc') or [''])[0]
+                if not rvc:
+                    return self._send(400, b'{"error":"rvc query param required"}')
+                audio, sr = sf.read(io.BytesIO(self.rfile.read(n)), dtype='float32')
+                with lock:
+                    wav, dur = encode(convert(audio, sr, rvc, int((q.get('pitch') or ['0'])[0])))
+            else:
+                return self._send(404, b'{"error":"not found"}')
             self.send_response(200)
             self.send_header('Content-Type', 'audio/wav')
             self.send_header('Content-Length', str(len(wav)))

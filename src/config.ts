@@ -24,6 +24,8 @@ export interface TalentConfig {
   voice: string
   rvc?: string
   speed: number
+  /** Semitones of f0 shift into the RVC model (e.g. +12 for a low voice into a high model). */
+  pitch: number
   twitch?: TwitchConfig
 }
 
@@ -107,6 +109,7 @@ export function parseConfig(text: string): StageConfig {
       voice: str(t, 'voice', w, 'af_heart'),
       ...(rvc ? { rvc } : {}),
       speed: num(t, 'speed', 1.0),
+      pitch: num(t, 'pitch', 0),
       ...(twitch ? { twitch } : {}),
     }
   }

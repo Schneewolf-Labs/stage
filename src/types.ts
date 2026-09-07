@@ -19,7 +19,7 @@ export type Mood = 'neutral' | 'happy' | 'sad' | 'angry' | 'surprised'
  * order on the page, so the server can send them as fast as it synthesizes.
  */
 export type StageCue =
-  | { type: 'load'; model: string; talent: string }
+  | { type: 'load'; model: string; talent: string; expressions: { name: string; url: string }[] }
   | { type: 'speak'; id: string; url: string; text: string }
   | { type: 'mood'; mood: Mood }
   | { type: 'state'; state: StageState; detail?: string }

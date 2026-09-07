@@ -25,6 +25,8 @@ model = "springfield/chb119.model3.json"
 voice = "af_heart"
 rvc = "egirl"
 speed = 1.0
+# Semitones of pitch shift into the RVC model; 0 for a voice already in the model's range.
+pitch = 0
 
 # Optional: let the talent hear (and answer) a Twitch chat. Remove the table to run without it.
 [talents.springfield.twitch]

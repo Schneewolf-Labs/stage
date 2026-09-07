@@ -35,6 +35,7 @@ bun run serve --talent springfield
 # 3. open http://127.0.0.1:3100/  (add ?bg=1 outside OBS to see the background)
 bun run src/index.ts say "Testing, testing. [happy] Is this thing on?"
 bun run src/index.ts chat "What are you working on today?"
+bun run src/index.ts convert take1.wav take1-egirl.wav --rvc egirl --pitch 12   # your own recording, in the character voice
 ```
 
 In OBS add a **Browser** source with the stage URL, 1920x1080, and it renders with a transparent
@@ -45,8 +46,12 @@ policy); OBS does not.
 
 The persona can steer its body with inline tags, which are stripped before synthesis:
 `[happy] [sad] [angry] [surprised] [neutral]` set the expression, `[nod]` nods, `[pose]` toggles
-the model's alternate pose. Unknown tags are dropped silently. Add one line to the persona's
-SOUL.md or AGENTS.md telling it these exist.
+the model's alternate pose. Unknown tags are dropped silently. See [docs/persona.md](docs/persona.md)
+for the paragraph to paste into the persona's SOUL.md.
+
+Models that ship `.exp3.json` expression files (in the model folder or an `Exp/` subfolder, the
+way VTube Studio finds them) get their moods from those, faded in and out; models without them
+get moods from brow, eye, and mouth parameters directly.
 
 ## Twitch Chat
 
@@ -73,7 +78,17 @@ chat, cue tags stripped.
 `services/voice/` is a small Python HTTP server: Kokoro-82M for the read (~40 ms to first audio
 on a GPU), optional RVC for the character's timbre. Put an RVC model in
 `services/voice/models/<name>/` (one `.pth`, optional `.index`) and name it in the talent's
-`rvc =`. Measured on an RTX A6000, per sentence: Kokoro RTF 0.01, RVC RTF ~0.11.
+`rvc =`, with `pitch =` in semitones when the base voice sits in a different range than the
+model. `POST /convert` (and `stage convert`) runs a recorded WAV through the same model, for
+voiceovers you perform yourself. Measured on an RTX A6000: Kokoro RTF 0.01, RVC RTF ~0.1, a
+3.6 s sentence in ~0.4 s end to end.
+
+## Safety
+
+An egirl agent has hands: shell, git, browser, code agent. Anything that lets strangers talk to a
+talent (a chat integration, a public `/chat`) is a prompt-injection path into those tools. Point
+such talents at an egirl instance with its tools disabled (`[tools]` in egirl.toml) and its own
+persona, and keep `stage.toml` bound to `127.0.0.1`.
 
 ## Models
 

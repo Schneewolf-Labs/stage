@@ -29,6 +29,9 @@ const MOODS = {
 const lerp = (a, b, k) => a + (b - a) * k
 
 let model = null, pidx = {}
+// mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
+// Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
+let expressions = {}, expWeight = {}
 let mood = 'neutral', state = 'idle', poseOn = 0, nodT = -1
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1 }
 let mouth = 0, analyser = null, ac = null
@@ -45,6 +48,7 @@ async function load(url) {
   }
   fit(); window.addEventListener('resize', fit)
   pidx = {}; m.internalModel.coreModel.getModel().parameters.ids.forEach((id, i) => { pidx[id] = i })
+
   let t = 0, last = performance.now()
   m.internalModel.on('beforeModelUpdate', () => {
     const now = performance.now(), dt = (now - last) / 1000; last = now; t += dt
@@ -56,7 +60,7 @@ async function load(url) {
     if (nodT >= 0) { fy += Math.sin(nodT * Math.PI * 2) * -0.5; nodT += dt * 2.2; if (nodT > 1) nodT = -1 }
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % 3.7) < 0.12 ? 0 : 1
-    const target = MOODS[mood] || MOODS.neutral
+    const target = expressions[mood] ? MOODS.neutral : (MOODS[mood] || MOODS.neutral)
     for (const k in cur) cur[k] = lerp(cur[k], target[k], 0.08)
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
     set('ParamBrowLY', cur.bl); set('ParamBrowRY', cur.br); set('ParamBrowLAngle', cur.ba); set('ParamBrowRAngle', cur.ba)
@@ -68,6 +72,16 @@ async function load(url) {
       level = Math.min(1, Math.sqrt(s / b.length) * 6)
     }
     mouth = lerp(mouth, level, level > mouth ? 0.6 : 0.25); set('ParamMouthOpenY', mouth)
+    for (const name in expressions) {
+      expWeight[name] = lerp(expWeight[name] || 0, name === mood ? 1 : 0, 0.1)
+      const w = expWeight[name]; if (w < 0.005) continue
+      for (const p of expressions[name]) {
+        const i = pidx[p.id]; if (i === undefined) continue
+        const c = m.internalModel.coreModel.getParameterValueByIndex(i)
+        const v = p.blend === 'Add' ? c + p.value * w : p.blend === 'Multiply' ? c * (1 + (p.value - 1) * w) : lerp(c, p.value, w)
+        m.internalModel.coreModel.setParameterValueByIndex(i, v)
+      }
+    }
     set('Param', poseOn) // chb119's pose toggle; harmless on models without it
   })
   model = m
@@ -101,10 +115,25 @@ async function pump() {
   pump()
 }
 
+async function loadExpressions(list) {
+  expressions = {}; expWeight = {}
+  for (const e of list) {
+    const key = Object.keys(MOODS).find((m) => e.name.toLowerCase().includes(m))
+    if (!key) continue
+    try {
+      const j = await (await fetch(e.url)).json()
+      expressions[key] = (j.Parameters || []).map((p) => ({ id: p.Id, value: p.Value, blend: p.Blend || 'Add' }))
+    } catch (err) { status(`expression ${e.name}: ${err.message}`) }
+  }
+}
+
 /* ---- cues ---- */
 function apply(cue) {
   switch (cue.type) {
-    case 'load': load(cue.model).catch((e) => status(`load failed: ${e.message}`)); break
+    case 'load':
+      loadExpressions(cue.expressions || [])
+      load(cue.model).catch((e) => status(`load failed: ${e.message}`))
+      break
     case 'speak': queue.push(cue); pump(); break
     case 'mood': mood = cue.mood; break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break

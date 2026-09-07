@@ -35,3 +35,23 @@ export async function voiceHealth(voiceUrl: string): Promise<unknown> {
   if (!res.ok) throw new Error(`voice service HTTP ${res.status}`)
   return res.json()
 }
+
+/** Recorded speech (a WAV of any rate) -> the same speech in an RVC model's voice. */
+export async function convert(
+  voiceUrl: string,
+  wav: ArrayBuffer,
+  rvc: string,
+  pitch = 0,
+): Promise<Clip> {
+  const res = await fetch(`${voiceUrl}/convert?rvc=${encodeURIComponent(rvc)}&pitch=${pitch}`, {
+    method: 'POST',
+    headers: { 'content-type': 'audio/wav' },
+    body: wav,
+  })
+  if (!res.ok) throw new Error(`voice service HTTP ${res.status}: ${await res.text()}`)
+  return {
+    wav: await res.arrayBuffer(),
+    seconds: Number(res.headers.get('x-audio-seconds') ?? 0),
+    genSeconds: Number(res.headers.get('x-gen-seconds') ?? 0),
+  }
+}
