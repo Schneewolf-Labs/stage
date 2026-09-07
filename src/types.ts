@@ -28,3 +28,12 @@ export type StageCue =
 
 /** Messages the page sends back. */
 export type StageReport = { type: 'spoke'; id: string } | { type: 'ready' }
+
+/** One viewer message from Twitch chat, filtered and ready for the batcher. */
+export interface ChatLine {
+  author: string
+  text: string
+  at: number
+  /** Hit a wake word or an @nick; forces a turn instead of waiting for the next tick. */
+  mentioned: boolean
+}
