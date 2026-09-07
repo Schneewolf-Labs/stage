@@ -7,6 +7,8 @@ import { synthesize } from './voice'
 export interface Stage {
   /** Push a cue to every connected page. */
   cue(c: StageCue): void
+  /** Bumped by an interrupt; a clip whose turn is older than this is dropped instead of spoken. */
+  generation(): number
   /** Store a clip and return the URL the page fetches it from. `seconds` bounds how long it counts as speaking. */
   addClip(wav: ArrayBuffer, seconds: number): { id: string; url: string }
 }
@@ -29,7 +31,9 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   for (const g of line.gestures) stage.cue({ type: 'gesture', name: g satisfies Gesture })
   if (!line.text) return
   const t0 = performance.now()
+  const gen = stage.generation()
   const clip = await synthesize(voiceUrl, talent, line.text)
+  if (stage.generation() !== gen) return // interrupted while synthesizing
   const { id, url } = stage.addClip(clip.wav, clip.seconds)
   stage.cue({ type: 'speak', id, url, text: line.text })
   log?.(

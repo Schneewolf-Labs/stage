@@ -25,6 +25,8 @@ export type StageCue =
   | { type: 'state'; state: StageState; detail?: string }
   | { type: 'gesture'; name: 'nod' | 'pose' }
   | { type: 'caption'; text: string }
+  /** Cut the current clip and drop everything queued. */
+  | { type: 'stop' }
 
 /** Messages the page sends back. */
 export type StageReport = { type: 'spoke'; id: string } | { type: 'ready' }

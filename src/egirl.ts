@@ -40,3 +40,17 @@ export async function* chat(talent: TalentConfig, message: string): AsyncGenerat
     }
   }
 }
+
+/** Ask egirl to abort the talent's in-flight turn. Best effort: an idle session is not an error. */
+export async function interrupt(talent: TalentConfig): Promise<boolean> {
+  const headers: Record<string, string> = {}
+  if (talent.egirl_token) headers.authorization = `Bearer ${talent.egirl_token}`
+  const res = await fetch(
+    `${talent.egirl_url}/sessions/${encodeURIComponent(talent.session)}/interrupt`,
+    {
+      method: 'POST',
+      headers,
+    },
+  ).catch(() => undefined)
+  return res?.ok ?? false
+}

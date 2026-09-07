@@ -94,7 +94,7 @@ setInterval(() => { if (document.hidden && model) { model.update(33); app.render
 
 /* ---- audio queue: clips play strictly in the order the server announced them ---- */
 const queue = []
-let playing = false
+let playing = false, current = null
 async function pump() {
   if (playing || !queue.length) return
   playing = true
@@ -103,13 +103,13 @@ async function pump() {
     ac = ac || new (window.AudioContext || window.webkitAudioContext)()
     if (ac.state !== 'running') await ac.resume()
     const buf = await ac.decodeAudioData(await (await fetch(cue.url)).arrayBuffer())
-    const src = ac.createBufferSource(); src.buffer = buf
+    const src = ac.createBufferSource(); src.buffer = buf; current = src
     analyser = ac.createAnalyser(); analyser.fftSize = 512
     src.connect(analyser); analyser.connect(ac.destination)
     captionEl.textContent = cue.text; captionEl.style.display = 'block'
     await new Promise((res) => { src.onended = res; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
-  analyser = null; captionEl.style.display = 'none'
+  analyser = null; current = null; captionEl.style.display = 'none'
   send({ type: 'spoke', id: cue.id })
   playing = false
   pump()
@@ -139,6 +139,7 @@ function apply(cue) {
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break
+    case 'stop': queue.length = 0; if (current) { try { current.stop() } catch {} } break
   }
 }
 

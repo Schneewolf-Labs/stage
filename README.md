@@ -35,6 +35,7 @@ bun run serve --talent springfield
 # 3. open http://127.0.0.1:3100/  (add ?bg=1 outside OBS to see the background)
 bun run src/index.ts say "Testing, testing. [happy] Is this thing on?"
 bun run src/index.ts chat "What are you working on today?"
+bun run src/index.ts stop                                    # cut her off mid-sentence
 bun run src/index.ts convert take1.wav take1-egirl.wav --rvc egirl --pitch 12   # your own recording, in the character voice
 ```
 
@@ -70,6 +71,7 @@ chat, cue tags stripped.
 | POST | `/chat` | `{message}` | send to the talent's egirl, perform the reply, return `{reply}` |
 | POST | `/say` | `{text}` | speak text directly (cue tags honored), no egirl |
 | POST | `/cue` | a cue object | raw cue passthrough, e.g. `{"type":"mood","mood":"sad"}` |
+| POST | `/interrupt` | | stop talking now: cut audio, drop queued clips, abort the egirl turn |
 | GET | `/health` | | stage + voice service status, plus Twitch connection and queue when configured |
 | WS | `/ws` | | what the page listens on |
 

@@ -4,6 +4,7 @@ import type { ServerWebSocket } from 'bun'
 import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
+import { interrupt } from './egirl'
 import { perform, type Stage, speak } from './performer'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { StageCue, StageReport } from './types'
@@ -64,6 +65,7 @@ export function startServer({ cfg, talent, log }: Deps) {
   const pendingSpoke = new Map<string, ReturnType<typeof setTimeout>>()
   let clipSeq = 0
   let inFlight = 0
+  let generation = 0
   const expressions = findExpressions(cfg.server.models_dir, talent.model)
   const loadCue: StageCue = {
     type: 'load',
@@ -77,6 +79,7 @@ export function startServer({ cfg, talent, log }: Deps) {
       const msg = JSON.stringify(c)
       for (const ws of clients) ws.send(msg)
     },
+    generation: () => generation,
     addClip(wav, seconds) {
       const id = `${Date.now().toString(36)}-${(clipSeq++).toString(36)}`
       clips.set(id, wav)
@@ -170,6 +173,17 @@ export function startServer({ cfg, talent, log }: Deps) {
           if (typeof body.message !== 'string' || !body.message.trim())
             return json({ error: 'message required' }, 400)
           return json({ ok: true, reply: await runTurn(body.message) })
+        }
+        if (path === '/interrupt') {
+          // Stop talking now: the page cuts audio and drops its queue, clips still synthesizing
+          // are discarded when they land, and egirl is asked to abort the turn.
+          generation++
+          stage.cue({ type: 'stop' })
+          for (const t of pendingSpoke.values()) clearTimeout(t)
+          pendingSpoke.clear()
+          const aborted = inFlight > 0 ? await interrupt(talent) : false
+          stage.cue({ type: 'state', state: 'idle' })
+          return json({ ok: true, aborted })
         }
         if (path === '/cue') {
           if (typeof body.type !== 'string') return json({ error: 'cue type required' }, 400)

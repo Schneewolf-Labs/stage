@@ -9,6 +9,7 @@ const HELP = `stage -- VTuber harness for egirl agents
   bun run src/index.ts say  "text" [--url http://127.0.0.1:3100]      speak a line on a running stage
   bun run src/index.ts chat "message" [--url ...]                    send a message to the talent's egirl and perform the reply
   bun run src/index.ts cue  '{"type":"mood","mood":"happy"}' [--url ...]
+  bun run src/index.ts stop [--url ...]                              cut speech, drop the queue, abort the egirl turn
   bun run src/index.ts convert in.wav out.wav [--rvc egirl] [--pitch 12] [--config stage.toml]
                                                                      your recording, in the RVC voice (voiceovers)
 
@@ -53,6 +54,8 @@ async function main(argv: string[]): Promise<void> {
       return post(base, '/chat', { message: args[0] ?? '' })
     case 'cue':
       return post(base, '/cue', JSON.parse(args[0] ?? '{}'))
+    case 'stop':
+      return post(base, '/interrupt', {})
     case 'convert': {
       const [input, output] = args
       if (!input || !output)
