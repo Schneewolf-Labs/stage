@@ -1,0 +1,9 @@
+kokoro>=0.9.4
+rvc-python
+soundfile
+numpy
+# uv/venv ships without pkg_resources; rvc-python and fairseq import it
+setuptools<70
+# misaki (Kokoro's English G2P) downloads this spaCy model on first use otherwise, by shelling out
+# to pip/uv at runtime; pin it so a fresh checkout installs everything up front.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

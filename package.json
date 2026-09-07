@@ -1,0 +1,28 @@
+{
+  "name": "stage",
+  "version": "0.1.0",
+  "description": "VTuber harness for egirl agents",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": { "stage": "./src/index.ts" },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "serve": "bun run src/index.ts serve",
+    "test": "bun test",
+    "lint": "biome check src/ test/",
+    "lint:fix": "biome check --fix src/ test/",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run lint && bun run typecheck",
+    "voice": "./services/voice/run.sh"
+  },
+  "dependencies": {
+    "smol-toml": "^1.6.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.15",
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": ["vtuber", "live2d", "egirl", "tts", "local-first"],
+  "license": "MIT"
+}
