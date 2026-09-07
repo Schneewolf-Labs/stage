@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+# Per-machine config. stage.example.toml is the tracked template.
+stage.toml
+# Python voice service
+services/voice/venv/
+services/voice/models/
+__pycache__/
+*.pyc
+# Live2D models are licensed per model and live outside the repo (see [server].models_dir)
+*.moc3
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp

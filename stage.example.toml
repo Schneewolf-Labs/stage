@@ -1,0 +1,36 @@
+# Stage config. Copy to stage.toml (gitignored) and point it at your machine.
+# One talent per `serve` process, chosen with --talent; the first one is the default.
+
+[server]
+host = "127.0.0.1"
+port = 3100
+# Directory holding Live2D model folders, served read-only at /models/. Never committed.
+models_dir = "~/Dropbox/Projects/vtuber"
+
+[voice]
+# services/voice/run.sh -- Kokoro for the read, optional RVC for the character voice.
+url = "http://127.0.0.1:8100"
+
+[talents.springfield]
+# The egirl instance this talent embodies. Stage talks to its HTTP API (POST /chat, stream).
+egirl_url = "http://127.0.0.1:3000"
+# Optional bearer token; $VARS are read from the environment / .env.
+egirl_token = "$EGIRL_API_TOKEN"
+# egirl session id; a stable id keeps the talent's conversation across restarts.
+session = "stage:springfield"
+# Path under models_dir to the model3.json.
+model = "springfield/chb119.model3.json"
+# Kokoro voice (af_* American female, am_* male, bf_/bm_ British) and optional RVC model name
+# from services/voice/models/<name>/. Remove `rvc` to hear the raw Kokoro voice.
+voice = "af_heart"
+rvc = "egirl"
+speed = 1.0
+
+[talents.kira]
+egirl_url = "http://127.0.0.1:3000"
+egirl_token = "$EGIRL_API_TOKEN"
+session = "stage:kira"
+model = "chibi/[G4V] nbeerbower FO833CF90E708.model3.json"
+voice = "af_bella"
+rvc = "egirl"
+speed = 1.05
