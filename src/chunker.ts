@@ -4,12 +4,22 @@ const MOODS: readonly Mood[] = ['neutral', 'happy', 'sad', 'angry', 'surprised']
 const GESTURES = ['nod', 'pose'] as const
 export type Gesture = (typeof GESTURES)[number]
 
+export interface LineImage {
+  url: string
+  caption: string
+}
+
 export interface Line {
-  /** Text to synthesize, cue tags removed. May be empty when a chunk was only tags. */
+  /** Text to synthesize, cue tags and image markup removed. May be empty. */
   text: string
   moods: Mood[]
   gestures: Gesture[]
+  /** Pictures the talent wants shown: markdown images and bare image URLs. */
+  images: LineImage[]
 }
+
+const MD_IMAGE = /!\[([^\]]*)\]\((\S+?)\)/g
+const BARE_IMAGE = /https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|avif)(?=[\s)\]]|$)/gi
 
 /**
  * Pull `[happy]`, `[nod]` style cue tags out of a chunk of text. Tags the persona writes inline
@@ -19,7 +29,16 @@ export interface Line {
 export function parseLine(chunk: string): Line {
   const moods: Mood[] = []
   const gestures: Gesture[] = []
+  const images: LineImage[] = []
   const text = chunk
+    .replace(MD_IMAGE, (_, alt: string, url: string) => {
+      images.push({ url, caption: alt.trim() })
+      return ' '
+    })
+    .replace(BARE_IMAGE, (url: string) => {
+      images.push({ url, caption: '' })
+      return ' '
+    })
     .replace(/\[([a-z]+)\]/gi, (_, tag: string) => {
       const t = tag.toLowerCase()
       if ((MOODS as readonly string[]).includes(t)) moods.push(t as Mood)
@@ -28,7 +47,7 @@ export function parseLine(chunk: string): Line {
     })
     .replace(/\s+/g, ' ')
     .trim()
-  return { text, moods, gestures }
+  return { text, moods, gestures, images }
 }
 
 /**

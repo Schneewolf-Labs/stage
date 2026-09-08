@@ -14,7 +14,7 @@ const VOICES = {
   'British male': ['bm_george', 'bm_lewis', 'bm_daniel', 'bm_fable'],
 }
 const MOOD_KEYS = { 1: 'neutral', 2: 'happy', 3: 'sad', 4: 'angry', 5: 'surprised' }
-const PANEL_KEYS = { m: 'model', e: 'scene', v: 'voice', b: 'brain', c: 'chat', t: 'twitch', i: 'mic', s: 'settings' }
+const PANEL_KEYS = { m: 'model', e: 'scene', v: 'voice', b: 'brain', d: 'director', c: 'chat', t: 'twitch', i: 'mic', s: 'settings' }
 
 /* ---------- state ---------- */
 const S = {
@@ -56,7 +56,7 @@ function setTalent(t) {
   setRange('pitch', 'pitchVal', t.pitch, (v) => v); setRange('speed', 'speedVal', t.speed, (v) => v.toFixed(2))
   $('btnMute').classList.toggle('on', !!t.muted); $('btnMute').title = t.muted ? 'Unmute the talent' : 'Mute the talent (kill switch)'
   if (t.muted) toast('Talent is muted')
-  applyTransformUI(t.transform); applySceneUI(t.scene)
+  applyTransformUI(t.transform); applySceneUI(t.scene); applyDirectorUI(t.director)
   $('brSession').textContent = `session ${t.name}`
   renderModels()
 }
@@ -195,7 +195,15 @@ function applySceneUI(sc) {
   setRange('sway', 'swayVal', sc.motion.sway, (v) => v.toFixed(2)); setRange('mspeed', 'mspeedVal', sc.motion.speed, (v) => v.toFixed(2)); setRange('blink', 'blinkVal', sc.motion.blink, (v) => v.toFixed(1))
   $('capShow').checked = sc.captions.show; setRange('capSize', 'capSizeVal', sc.captions.size, (v) => v)
   if (sc.background.color) $('bgColor').value = sc.background.color
+  $('bgImage').value = sc.background.image || ''
+  if (sc.screen) { setRange('sx', 'sxVal', sc.screen.x, (v) => v.toFixed(2)); setRange('sy', 'syVal', sc.screen.y, (v) => v.toFixed(2)); setRange('sw', 'swVal', sc.screen.w, (v) => Math.round(v * 100)) }
 }
+const pushScreen = debounce(() => post('/scene', { screen: { x: Number($('sx').value), y: Number($('sy').value), w: Number($('sw').value) } }), 120)
+bindRange('sx', 'sxVal', (v) => v.toFixed(2), pushScreen); bindRange('sy', 'syVal', (v) => v.toFixed(2), pushScreen); bindRange('sw', 'swVal', (v) => Math.round(v * 100), pushScreen)
+$('btnTestImage').addEventListener('click', () => post('/image', { url: '/models/' + (S.modelList.find((m) => m.icon)?.icon?.replace(/^\/models\//, '') || ''), caption: 'test picture', seconds: 8 }))
+$('btnClearImage').addEventListener('click', () => post('/image', { url: null }))
+$('btnBgImage').addEventListener('click', () => post('/scene', { background: { image: $('bgImage').value.trim() } }))
+$('btnBgImageClear').addEventListener('click', () => post('/scene', { background: { image: '' } }))
 const pushMotion = debounce(() => post('/scene', { motion: { sway: Number($('sway').value), speed: Number($('mspeed').value), blink: Number($('blink').value) } }), 120)
 bindRange('sway', 'swayVal', (v) => v.toFixed(2), pushMotion); bindRange('mspeed', 'mspeedVal', (v) => v.toFixed(2), pushMotion); bindRange('blink', 'blinkVal', (v) => v.toFixed(1), pushMotion)
 const pushCaptions = debounce(() => post('/scene', { captions: { show: $('capShow').checked, size: Number($('capSize').value) } }), 120)
@@ -272,6 +280,28 @@ function onEvent(ev) {
   renderTurns()
 }
 
+/* ---------- director panel ---------- */
+function applyDirectorUI(d) { if (!d) return; $('dirOn').checked = d.enabled; setRange('dirInt', 'dirIntVal', d.interval_s, (v) => v); $('dirPrompt').value = d.prompt }
+const pushDirector = () => post('/director', { enabled: $('dirOn').checked, interval_s: Number($('dirInt').value), prompt: $('dirPrompt').value }).then((r) => toast(r.error || (r.director.enabled ? `Director on, every ${r.director.interval_s}s` : 'Director off')))
+$('dirOn').addEventListener('change', pushDirector); bindRange('dirInt', 'dirIntVal', (v) => v, debounce(pushDirector, 300))
+$('btnDirSave').addEventListener('click', pushDirector)
+$('btnDirRun').addEventListener('click', () => post('/director', { prompt: $('dirPrompt').value }).then(() => post('/director/run')).then(() => { showPanel('chat'); toast('Director fired') }))
+bindRange('gap', 'gapVal', (v) => v, () => {})
+$('btnScriptRun').addEventListener('click', () => {
+  const lines = $('scriptText').value.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return toast('Script is empty')
+  post('/script', { lines, gap_ms: Number($('gap').value) }).then((r) => toast(r.error || (r.muted ? 'Muted: script not read' : `Reading ${r.total} lines`)))
+})
+$('btnScriptStop').addEventListener('click', () => post('/script/stop'))
+function onScript(ev) {
+  const p = $('scriptProgress')
+  if (ev.phase === 'start') p.textContent = `0 / ${ev.total}`
+  else if (ev.phase === 'line') p.textContent = `${ev.index + 1} / ${ev.total}`
+  else if (ev.phase === 'done') p.textContent = 'done'
+  else if (ev.phase === 'stopped') p.textContent = 'stopped'
+}
+function onDirector(ev) { $('dirLast').textContent = ev.phase === 'fired' ? `fired ${new Date().toLocaleTimeString()}` : `skipped: ${ev.reason}` }
+
 /* ---------- twitch panel ---------- */
 function onChat(ev) {
   $('twEmpty')?.remove()
@@ -279,6 +309,9 @@ function onChat(ev) {
   line.append(el('time', null, new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })), el('b', null, ev.author), document.createTextNode(ev.text))
   const log = $('chatlog'); log.prepend(line); while (log.children.length > 200) log.lastChild.remove()
 }
+
+$('btnTwPause').addEventListener('click', () => post('/twitch', { paused: !S.health?.twitch?.paused }).then(pollHealth))
+$('btnTwReply').addEventListener('click', () => post('/twitch', { reply: !S.health?.twitch?.reply }).then(pollHealth))
 
 /* ---------- health + readiness ---------- */
 function renderReady() {
@@ -297,7 +330,13 @@ async function pollHealth() {
     dots[0].className = 'dot ok'; dots[1].className = `dot ${h.voice && !h.voice.error ? 'ok' : 'bad'}`; dots[2].className = `dot ${h.pages > 0 ? 'ok' : ''}`
     $('railHealth').title = `server ok · voice ${h.voice?.error ? 'down' : 'ok'} · egirl ${h.egirl?.ok ? 'ok' : 'down'} · ${h.pages} page(s)`
     if (h.voice?.rvc) { const sel = $('rvcSel'); const cur = sel.value; sel.innerHTML = '<option value="">off (raw Kokoro)</option>'; for (const n of h.voice.rvc) sel.appendChild(new Option(n, n)); sel.value = S.talent?.rvc && h.voice.rvc.includes(S.talent.rvc) ? S.talent.rvc : cur }
-    if (h.twitch) { $('twStatus').textContent = h.twitch.connected ? 'connected' : 'reconnecting'; $('twStatus').style.color = h.twitch.connected ? 'var(--ok)' : 'var(--warn)'; $('twQueued').textContent = h.twitch.queued; $('twDropped').textContent = h.twitch.dropped; $('twSent').textContent = h.twitch.sent }
+    if (h.twitch) {
+      $('twStatus').textContent = h.twitch.paused ? 'paused' : h.twitch.connected ? 'connected' : 'reconnecting'; $('twStatus').style.color = h.twitch.paused ? 'var(--warn)' : h.twitch.connected ? 'var(--ok)' : 'var(--warn)'
+      $('twQueued').textContent = h.twitch.queued; $('twDropped').textContent = h.twitch.dropped; $('twSent').textContent = h.twitch.sent
+      $('btnTwPause').disabled = false; $('btnTwReply').disabled = false
+      $('btnTwPause').textContent = h.twitch.paused ? 'Resume intake' : 'Pause intake'; $('btnTwPause').classList.toggle('on', !!h.twitch.paused)
+      $('btnTwReply').textContent = `Replies: ${h.twitch.reply ? 'on' : 'off'}`; $('btnTwReply').classList.toggle('on', !!h.twitch.reply)
+    }
     if (app.dataset.panel === 'settings') renderReady()
   } catch { $('railHealth').querySelectorAll('.dot')[0].className = 'dot bad' }
 }
@@ -325,6 +364,8 @@ function connect() {
       case 'logs': for (const l of ev.lines) addLog(l); break
       case 'log': addLog(ev.text); break
       case 'chat': onChat(ev); break
+      case 'script': onScript(ev); break
+      case 'director': onDirector(ev); break
       case 'clip': addClipStat(ev); onEvent(ev); break
       case 'speak': case 'playing': case 'spoke': case 'stop': case 'turn': case 'reasoning': case 'token': case 'tool': case 'tool_done': onEvent(ev); break
     }

@@ -68,14 +68,21 @@ const egirl = Bun.serve({
       return Response.json({ ok: true, thinking: (body as { level: string }).level })
     if (p === '/chat') {
       const enc = new TextEncoder()
-      const frames = [
-        { t: 'reasoning', v: 'hmm ' },
-        { t: 'tool', v: ['read_board'] },
-        { t: 'tool_done', v: 'read_board' },
-        { t: 'token', v: '[happy] One. ' },
-        { t: 'token', v: 'Two. ' },
-        { t: 'done', content: '[happy] One. Two.' },
-      ]
+      const msg = String((body as { message?: string })?.message ?? '')
+      const frames = msg.includes('picture')
+        ? [
+            { t: 'token', v: 'Here. ![a cat](http://img/cat.png) ' },
+            { t: 'token', v: 'Like it? ' },
+            { t: 'done', content: 'Here. ![a cat](http://img/cat.png) Like it?' },
+          ]
+        : [
+            { t: 'reasoning', v: 'hmm ' },
+            { t: 'tool', v: ['read_board'] },
+            { t: 'tool_done', v: 'read_board' },
+            { t: 'token', v: '[happy] One. ' },
+            { t: 'token', v: 'Two. ' },
+            { t: 'done', content: '[happy] One. Two.' },
+          ]
       return new Response(
         new ReadableStream({
           async start(c) {
@@ -151,7 +158,16 @@ const post = (p: string, b: unknown = {}) =>
 async function client(role?: 'console') {
   const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`)
   const got: Record<string, unknown>[] = []
-  ws.onmessage = (m) => got.push(JSON.parse(String(m.data)))
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(String(m.data)) as Record<string, unknown>
+    got.push(msg)
+    // A page plays each clip and reports it, instantly here; without this the server keeps
+    // counting unacknowledged clips as "still speaking" for a grace period.
+    if (!role && msg.type === 'speak') {
+      ws.send(JSON.stringify({ type: 'playing', id: msg.id }))
+      ws.send(JSON.stringify({ type: 'spoke', id: msg.id }))
+    }
+  }
   await new Promise((r) => (ws.onopen = r))
   ws.send(JSON.stringify({ type: 'ready', ...(role ? { role } : {}) }))
   await Bun.sleep(30)
@@ -364,11 +380,139 @@ describe('turns', () => {
     expect(page.got.filter((m) => m.type === 'speak')).toHaveLength(2)
     // pages report playback; consoles hear it as playing/spoke
     const id = String(clips[0]?.id)
-    page.send({ type: 'playing', id })
-    await con.waitFor((m) => m.type === 'playing' && m.id === id)
-    page.send({ type: 'spoke', id })
-    await con.waitFor((m) => m.type === 'spoke' && m.id === id)
+    expect(con.got.find((m) => m.type === 'playing' && m.id === id)).toBeDefined()
+    expect(con.got.find((m) => m.type === 'spoke' && m.id === id)).toBeDefined()
     page.close()
     con.close()
+  })
+})
+
+describe('script', () => {
+  test('POST /script plays lines in order with progress events, and can be stopped', async () => {
+    const page = await client()
+    const con = await client('console')
+    const r = await post('/script', {
+      lines: ['[happy] Step one.', 'Step two.', 'Step three.'],
+      gap_ms: 10,
+    }).then((x) => x.json())
+    expect(r.ok).toBe(true)
+    await con.waitFor((m) => m.type === 'script' && m.phase === 'start' && m.total === 3)
+    await con.waitFor((m) => m.type === 'script' && m.phase === 'line' && m.index === 0)
+    await con.waitFor((m) => m.type === 'script' && m.phase === 'done')
+    expect(page.got.filter((m) => m.type === 'speak').map((m) => m.text)).toEqual([
+      'Step one.',
+      'Step two.',
+      'Step three.',
+    ])
+    expect(page.got.find((m) => m.type === 'mood' && m.mood === 'happy')).toBeDefined()
+    // a second script while one runs replaces it; stop ends it
+    await post('/script', {
+      lines: Array.from({ length: 20 }, (_, i) => `Line ${i}.`),
+      gap_ms: 300,
+    })
+    await con.waitFor((m) => m.type === 'script' && m.phase === 'line' && m.index === 0)
+    await post('/script/stop')
+    await con.waitFor((m) => m.type === 'script' && m.phase === 'stopped')
+    const spoken = page.got.filter((m) => m.type === 'speak' && /^Line/.test(String(m.text))).length
+    await Bun.sleep(400)
+    expect(page.got.filter((m) => m.type === 'speak' && /^Line/.test(String(m.text))).length).toBe(
+      spoken,
+    )
+    expect(spoken).toBeLessThan(20)
+    page.close()
+    con.close()
+  })
+  test('POST /script validates', async () => {
+    expect((await post('/script', { lines: 'nope' })).status).toBe(400)
+    expect((await post('/script', { lines: [] })).status).toBe(400)
+  })
+})
+
+describe('director', () => {
+  test('POST /director persists and fires turns on its interval while idle', async () => {
+    await post('/interrupt') // known-idle: clears anything earlier tests left queued
+    const page = await client()
+    const con = await client('console')
+    const r = await post('/director', {
+      enabled: true,
+      interval_s: 0.2,
+      prompt: 'director tick',
+    }).then((x) => x.json())
+    expect(r.director).toEqual({ enabled: true, interval_s: 0.2, prompt: 'director tick' })
+    expect((await get('/talent')).director.enabled).toBe(true)
+    expect(readOverrides('test', overridesDir).director?.prompt).toBe('director tick')
+    await con.waitFor(
+      (m) => m.type === 'turn' && m.phase === 'start' && m.message === 'director tick',
+      3000,
+    )
+    await con.waitFor((m) => m.type === 'director' && m.phase === 'fired')
+    await post('/director', { enabled: false })
+    await con.waitFor(
+      (m) => m.type === 'talent' && (m.director as { enabled: boolean }).enabled === false,
+    )
+    await Bun.sleep(500)
+    const n = con.got.filter((m) => m.type === 'director' && m.phase === 'fired').length
+    await Bun.sleep(500)
+    expect(con.got.filter((m) => m.type === 'director' && m.phase === 'fired').length).toBe(n)
+    page.close()
+    con.close()
+  })
+  test('POST /director/run fires once regardless of the toggle', async () => {
+    const con = await client('console')
+    await post('/director', { prompt: 'once' })
+    await post('/director/run')
+    await con.waitFor((m) => m.type === 'turn' && m.phase === 'start' && m.message === 'once')
+    con.close()
+  })
+  test('POST /director validates the interval', async () => {
+    expect((await post('/director', { interval_s: 0 })).status).toBe(400)
+    expect((await post('/director', { interval_s: 'fast' })).status).toBe(400)
+  })
+})
+
+describe('images', () => {
+  test('POST /image shows a picture on every page', async () => {
+    const page = await client()
+    await post('/image', { url: 'http://img/x.png', caption: 'x', seconds: 5 })
+    const cue = await page.waitFor((m) => m.type === 'image')
+    expect(cue).toEqual({ type: 'image', url: 'http://img/x.png', caption: 'x', seconds: 5 })
+    expect((await post('/image', {})).status).toBe(400)
+    await post('/image', { url: null })
+    await page.waitFor((m) => m.type === 'image' && m.url === null) // clears the screen
+    page.close()
+  })
+  test('a reply with a markdown image shows it and does not read the markup aloud', async () => {
+    const page = await client()
+    await post('/chat', { message: 'draw me a picture' })
+    const cue = await page.waitFor((m) => m.type === 'image')
+    expect(cue.url).toBe('http://img/cat.png')
+    expect(cue.caption).toBe('a cat')
+    const spoken = page.got.filter((m) => m.type === 'speak').map((m) => m.text)
+    expect(spoken).toEqual(['Here.', 'Like it?'])
+    page.close()
+  })
+  test('scene carries screen placement and a background image', async () => {
+    const page = await client()
+    await post('/scene', {
+      screen: { x: 0.2, w: 0.5 },
+      background: { image: 'backgrounds/room.png' },
+    })
+    const cue = await page.waitFor((m) => m.type === 'scene')
+    const sc = cue.scene as {
+      screen: { x: number; y: number; w: number }
+      background: { image: string }
+    }
+    expect(sc.screen).toEqual({ x: 0.2, y: -0.15, w: 0.5 })
+    expect(sc.background.image).toBe('backgrounds/room.png')
+    await post('/scene', { screen: { x: 0, w: 0.4 }, background: { image: '' } })
+    page.close()
+  })
+})
+
+describe('twitch runtime', () => {
+  test('POST /twitch is a 400 when the talent has no twitch table', async () => {
+    const r = await post('/twitch', { paused: true })
+    expect(r.status).toBe(400)
+    expect((await get('/health')).twitch).toBeUndefined()
   })
 })

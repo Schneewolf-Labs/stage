@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import type { TalentConfig } from '../src/config'
 import {
   applyOverrides,
+  DEFAULT_DIRECTOR,
   DEFAULT_SCENE,
+  directorFrom,
   readOverrides,
   sceneFrom,
   writeOverrides,
@@ -78,5 +80,26 @@ describe('persist', () => {
   test('an unreadable file is ignored rather than crashing startup', () => {
     Bun.write(join(dir, 'bad.toml'), 'this = = not toml')
     expect(readOverrides('bad', dir)).toEqual({})
+  })
+})
+
+describe('persist: director and screen', () => {
+  test('sceneFrom carries screen placement and background image defaults', () => {
+    const s = sceneFrom({})
+    expect(s.screen).toEqual({ x: -0.55, y: -0.15, w: 0.4 })
+    expect(s.background).toEqual({ color: '', image: '' })
+    expect(sceneFrom({ scene: { screen: { w: 0.6 } } }).screen).toEqual({
+      x: -0.55,
+      y: -0.15,
+      w: 0.6,
+    })
+  })
+  test('directorFrom fills defaults and is off unless saved on', () => {
+    expect(directorFrom({})).toEqual({
+      enabled: false,
+      interval_s: 45,
+      prompt: DEFAULT_DIRECTOR.prompt,
+    })
+    expect(directorFrom({ director: { enabled: true, interval_s: 10 } }).enabled).toBe(true)
   })
 })

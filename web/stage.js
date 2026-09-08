@@ -39,7 +39,8 @@ const lerp = (a, b, k) => a + (b - a) * k
 
 let model = null, pidx = {}
 let transform = { x: 0, y: 0, scale: 1 }
-let scene = { motion: { sway: 1, speed: 1, blink: 3.7 }, captions: { show: true, size: 22 }, background: { color: '' } }
+let scene = { motion: { sway: 1, speed: 1, blink: 3.7 }, captions: { show: true, size: 22 }, background: { color: '', image: '' }, screen: { x: -0.55, y: -0.15, w: 0.4 } }
+let imageTimer
 let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
@@ -161,6 +162,7 @@ function apply(cue) {
       load(cue.model).catch((e) => status(`load failed: ${e.message}`))
       break
     case 'transform': transform = clampTransform(cue); fitNow(); break
+    case 'image': showImage(cue); break
     case 'scene': applyScene(cue.scene); break
     case 'speak': queue.push(cue); pump(); break
     case 'mood': mood = cue.mood; break
@@ -173,12 +175,31 @@ function apply(cue) {
 }
 
 function applyScene(sc) {
-  scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background } }
+  scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background }, screen: { ...scene.screen, ...sc.screen } }
   captionEl.style.fontSize = `${scene.captions.size}px`
   if (!showCaptions()) captionEl.style.display = 'none'
-  document.body.style.background = scene.background.color || ''
-  document.body.classList.toggle('opaque', !!scene.background.color || q.get('bg') === '1')
-  if (scene.background.color) document.body.style.background = scene.background.color
+  const bg = scene.background
+  const img = bg.image ? (/^https?:\/\//.test(bg.image) ? bg.image : `/models/${bg.image}`) : ''
+  document.body.classList.toggle('opaque', !!bg.color || !!img || q.get('bg') === '1')
+  document.body.style.background = img ? `${bg.color || '#000'} url("${img}") center / cover no-repeat` : bg.color || ''
+  placeScreen()
+}
+
+/* ---- the screen: a picture the talent shows, placed by scene.screen ---- */
+const screenEl = document.getElementById('screen')
+function placeScreen() {
+  const { x, y, w } = scene.screen
+  screenEl.style.width = `${w * 100}%`
+  screenEl.style.left = `${50 + x * 50}%`; screenEl.style.top = `${50 + y * 50}%`
+}
+function showImage(cue) {
+  clearTimeout(imageTimer)
+  if (!cue.url) { screenEl.classList.remove('on'); return }
+  const img = screenEl.querySelector('img'); const cap = screenEl.querySelector('figcaption')
+  img.onload = () => screenEl.classList.add('on')
+  img.src = cue.url; img.alt = cue.caption || ''
+  cap.textContent = cue.caption || ''; cap.style.display = cue.caption ? 'block' : 'none'
+  if (cue.seconds > 0) imageTimer = setTimeout(() => screenEl.classList.remove('on'), cue.seconds * 1000)
 }
 
 /* ---- edit mode: drag to move, wheel to scale; the server rebroadcasts to every page ---- */

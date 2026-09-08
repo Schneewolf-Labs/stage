@@ -33,6 +33,7 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   const line = parseLine(chunk)
   for (const m of line.moods) stage.cue({ type: 'mood', mood: m })
   for (const g of line.gestures) stage.cue({ type: 'gesture', name: g satisfies Gesture })
+  for (const img of line.images) stage.cue({ type: 'image', url: img.url, caption: img.caption })
   if (!line.text) return
   if (stage.muted()) {
     log?.(`muted, skipped: ${line.text}`)

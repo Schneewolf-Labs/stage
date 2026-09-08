@@ -1,4 +1,4 @@
-import type { Scene, Transform } from './persist'
+import type { Director, Scene, Transform } from './persist'
 
 /** Events egirl's `POST /chat` (stream: true) emits as SSE `data:` frames. */
 export type EgirlEvent =
@@ -42,6 +42,8 @@ export type StageCue =
   | { type: 'stop' }
   /** Pin a Cubism parameter (console sliders); `value: null` releases it. */
   | { type: 'param'; id: string; value: number | null }
+  /** Show a picture on the scene's screen; `url: null` clears it. `seconds` auto-hides. */
+  | { type: 'image'; url: string | null; caption?: string; seconds?: number }
 
 /** Messages the page sends back. A console announces itself with role: 'console'. */
 export type StageReport =
@@ -81,7 +83,12 @@ export type ConsoleEvent =
       muted: boolean
       transform: Transform
       scene: Scene
+      director: Director
     }
+  /** A script of lines being read: progress as each line is queued. */
+  | { type: 'script'; phase: 'start' | 'line' | 'done' | 'stopped'; index?: number; total: number }
+  /** The director fired its prompt. */
+  | { type: 'director'; phase: 'fired' | 'skipped'; reason?: string }
   | { type: 'log'; text: string }
   | { type: 'logs'; lines: string[] }
 

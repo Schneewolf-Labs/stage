@@ -62,8 +62,27 @@ to hear the preview, and a server log drawer. Everything the console changes is 
 `stage.d/<talent>.toml` (gitignored) and wins over `stage.toml` on the next start; delete the
 file to reset.
 
+**Director** covers the two ways a talent performs without a human typing: an **auto-prompt**
+that runs a standing instruction on a cadence while she is idle (game commentary, chat check-ins;
+persisted, with a run-once button), and a **script** reader for narration written ahead
+(tutorials, intros): one line per row, cue tags honoured, a pause between lines, stoppable.
+
+**Pictures.** A markdown image or a bare image URL in a reply is not read aloud; it is shown on
+the scene's *screen*, a placeable area next to the model, with its alt text as caption. Anything
+else can put a picture there with `POST /image`. This is how an image-generating talent shows
+her work on stream.
+
 Planned and stubbed in the UI: mic passthrough (live RVC on your own voice), clip recording,
 named scene presets, custom hotkeys.
+
+### Which workflow needs what
+
+| Use case | Talent setup | In the console |
+|---|---|---|
+| Just chatting on Twitch | `[talents.x.twitch]`, an egirl with tools off, persona with the cue-tag paragraph | Twitch panel (pause intake, replies), Setup checklist green incl. "tools locked down", background from Scene |
+| Playing / reacting to a game | egirl with the screenshot tool on | Director auto-prompt every N seconds; OBS captures game + stage |
+| Tutorial screencast | any voice; egirl optional | Director script with the narration; OBS records the app + stage; or voice it and `stage convert` |
+| Image generation (nikuniku900) | egirl with an image tool (MCP) that returns URLs; persona includes them as markdown | Scene → Screen placement; pictures appear as she describes them |
 
 ## Cue Tags
 
@@ -99,6 +118,10 @@ chat, cue tags stripped.
 | POST | `/transform` | `{x?, y?, scale?}` | place the model on the canvas (fractions of the screen, scale x), saved per model |
 | POST | `/scene` | `{motion?, captions?, background?}` | idle motion, caption style, background, saved |
 | POST | `/mute` | `{on}` | kill switch: stop now and synthesize nothing until unmuted |
+| POST | `/script` | `{lines, gap_ms?}` | read lines in order; `/script/stop` ends it; progress as `script` events |
+| POST | `/director` | `{enabled?, interval_s?, prompt?}` | the auto-prompt loop, saved; `/director/run` fires it once |
+| POST | `/image` | `{url, caption?, seconds?}` | show a picture on the screen area; `url: null` clears |
+| POST | `/twitch` | `{paused?, reply?}` | runtime chat toggles (400 without a twitch table) |
 | GET | `/egirl` | | the talent's egirl `/info` and session context, for the Brain panel |
 | POST | `/egirl/thinking` | `{level}` | set the session's thinking level (off/low/medium/high) |
 | GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
@@ -143,7 +166,9 @@ src/
   performer.ts  egirl events -> voice -> cues
   voice.ts      voice service client
   models.ts     model + .exp3 discovery under models_dir
-  persist.ts    stage.d/<talent>.toml overrides (voice, model, placement, scene)
+  persist.ts    stage.d/<talent>.toml overrides (voice, model, placement, scene, director)
+  script.ts     reads a list of lines in order
+  director.ts   prompts the talent on a cadence while idle
 web/            render page (index.html + stage.js), console (console.html/css/js), core.js (pure
                 logic shared by both and unit-tested), vendored libs
 services/voice/ Kokoro + RVC HTTP service

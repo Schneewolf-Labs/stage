@@ -5,17 +5,20 @@ import { clampTransform } from '../web/core.js'
 import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
+import { startDirector } from './director'
 import { brain, egirlUp, interrupt, isThinkingLevel, setThinking } from './egirl'
 import { findExpressions, findModels } from './models'
 import { perform, type Stage, speak } from './performer'
 import {
   DIR,
+  directorFrom,
   type Overrides,
   readOverrides,
   type Scene,
   sceneFrom,
   writeOverrides,
 } from './persist'
+import { ScriptRunner } from './script'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { ConsoleEvent, StageCue, StageReport } from './types'
 import { voiceHealth } from './voice'
@@ -91,6 +94,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     muted,
     transform: transformFor(talent.model),
     scene: sceneFrom(overrides),
+    director: directorFrom(overrides),
   })
   const send = (role: Role | undefined, o: unknown): void => {
     const msg = JSON.stringify(o)
@@ -128,16 +132,29 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     }
   }
   const isBusy = (): boolean => inFlight > 0 || pendingSpoke.size > 0
+  const script = new ScriptRunner({ speak: (chunk) => speak(opts, chunk), event: stage.event, log })
+  const director = startDirector({
+    get: () => directorFrom(overrides),
+    isBusy: () => isBusy() || script.running,
+    turn: runTurn,
+    event: stage.event,
+    log,
+  })
 
   let twitch: TwitchHandle | undefined
   let batcher: ChatBatcher | undefined
+  let twitchPaused = false
+  let twitchReply = talent.twitch?.reply ?? false
   if (talent.twitch) {
     const tw = talent.twitch
-    batcher = new ChatBatcher({ maxBatch: tw.max_batch, isBusy }, (lines, skipped) => {
-      runTurn(formatBatch(tw.channel, lines, skipped))
-        .then((reply) => tw.reply && reply && twitch?.send(reply))
-        .catch((e) => log(`twitch turn failed: ${e}`))
-    })
+    batcher = new ChatBatcher(
+      { maxBatch: tw.max_batch, isBusy: () => isBusy() || twitchPaused },
+      (lines, skipped) => {
+        runTurn(formatBatch(tw.channel, lines, skipped))
+          .then((reply) => twitchReply && reply && twitch?.send(reply))
+          .catch((e) => log(`twitch turn failed: ${e}`))
+      },
+    )
     const b = batcher
     twitch = startTwitch({
       cfg: tw,
@@ -161,7 +178,15 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     voice: await voiceHealth(cfg.voice.url).catch((e) => ({ error: String(e) })),
     egirl: { ok: await egirlUp(talent) },
     ...(twitch && batcher
-      ? { twitch: { ...twitch.stats(), queued: batcher.size, dropped: batcher.dropped } }
+      ? {
+          twitch: {
+            ...twitch.stats(),
+            queued: batcher.size,
+            dropped: batcher.dropped,
+            paused: twitchPaused,
+            reply: twitchReply,
+          },
+        }
       : {}),
   })
 
@@ -223,6 +248,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           // Stop talking now: the page cuts audio and drops its queue, clips still synthesizing
           // are discarded when they land, and egirl is asked to abort the turn.
           generation++
+          script.stop()
           stage.cue({ type: 'stop' })
           for (const t of pendingSpoke.values()) clearTimeout(t)
           pendingSpoke.clear()
@@ -270,6 +296,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             motion: pick('motion'),
             captions: pick('captions'),
             background: pick('background'),
+            screen: pick('screen'),
           }
           save()
           stage.cue({ type: 'scene', scene: sceneFrom(overrides) })
@@ -287,6 +314,56 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           }
           stage.event(talentEvent())
           return json({ ok: true, muted })
+        }
+        if (path === '/script') {
+          const lines = Array.isArray(body.lines)
+            ? body.lines.filter((l): l is string => typeof l === 'string' && !!l.trim())
+            : []
+          if (!lines.length)
+            return json({ error: 'lines must be a non-empty list of strings' }, 400)
+          if (muted) return json({ ok: true, muted: true })
+          script.start(lines, typeof body.gap_ms === 'number' ? body.gap_ms : 250)
+          return json({ ok: true, total: lines.length })
+        }
+        if (path === '/script/stop') return json({ ok: true, stopped: script.stop() })
+        if (path === '/director') {
+          if ('interval_s' in body && (typeof body.interval_s !== 'number' || body.interval_s <= 0))
+            return json({ error: 'interval_s must be a positive number of seconds' }, 400)
+          const d = directorFrom(overrides)
+          overrides.director = {
+            enabled: typeof body.enabled === 'boolean' ? body.enabled : d.enabled,
+            interval_s: typeof body.interval_s === 'number' ? body.interval_s : d.interval_s,
+            prompt: typeof body.prompt === 'string' ? body.prompt : d.prompt,
+          }
+          save()
+          director.rearm()
+          stage.event(talentEvent())
+          return json({ ok: true, director: directorFrom(overrides) })
+        }
+        if (path === '/director/run') {
+          director.fire()
+          return json({ ok: true })
+        }
+        if (path === '/image') {
+          if (!('url' in body) || (body.url !== null && typeof body.url !== 'string'))
+            return json({ error: 'url required (a string, or null to clear)' }, 400)
+          const cue: StageCue = {
+            type: 'image',
+            url: body.url as string | null,
+            ...(typeof body.caption === 'string' ? { caption: body.caption } : {}),
+            ...(typeof body.seconds === 'number' ? { seconds: body.seconds } : {}),
+          }
+          stage.cue(cue)
+          return json({ ok: true })
+        }
+        if (path === '/twitch') {
+          if (!twitch || !batcher) return json({ error: 'this talent has no [twitch] table' }, 400)
+          if (typeof body.paused === 'boolean') twitchPaused = body.paused
+          if (typeof body.reply === 'boolean') twitchReply = body.reply
+          log(
+            `twitch: ${twitchPaused ? 'paused' : 'listening'}, replies ${twitchReply ? 'on' : 'off'}`,
+          )
+          return json({ ok: true, paused: twitchPaused, reply: twitchReply })
         }
         if (path === '/egirl/thinking') {
           if (!isThinkingLevel(body.level))

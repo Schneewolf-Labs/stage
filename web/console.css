@@ -199,3 +199,8 @@ code { font-family: var(--mono); font-size: 12px }
 .ready li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--err); box-shadow: 0 0 8px rgba(255, 95, 135, .5) }
 .ready li.ok::before { background: var(--ok); box-shadow: 0 0 8px rgba(135, 215, 135, .5) }
 .ready li .d { color: var(--dim); font-family: var(--mono); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+.field textarea, #scriptText { width: 100%; resize: vertical; padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2); color: var(--text); outline: none; font: 12.5px/1.45 var(--font) }
+.field input[type=text], .field input:not([type]) { padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2); color: var(--text); outline: none }
+#scriptText { margin-bottom: 10px }
+.btn.on { color: #fff; background: var(--grad); border-color: transparent }

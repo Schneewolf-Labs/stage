@@ -42,3 +42,20 @@ describe('parseLine', () => {
     expect(parseLine('[sad]').text).toBe('')
   })
 })
+
+describe('parseLine images', () => {
+  test('markdown images are pulled out of the spoken text', () => {
+    const l = parseLine('Here you go! ![a cat](http://x/cat.png) [happy] Cute, right?')
+    expect(l.text).toBe('Here you go! Cute, right?')
+    expect(l.images).toEqual([{ url: 'http://x/cat.png', caption: 'a cat' }])
+    expect(l.moods).toEqual(['happy'])
+  })
+  test('bare image urls count too, other urls are left alone', () => {
+    const l = parseLine('see https://x/y/z.webp and https://x/page')
+    expect(l.images).toEqual([{ url: 'https://x/y/z.webp', caption: '' }])
+    expect(l.text).toBe('see and https://x/page')
+  })
+  test('no images gives an empty list', () => {
+    expect(parseLine('plain').images).toEqual([])
+  })
+})
