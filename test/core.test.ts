@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import {
   clampTransform,
   clipStats,
+  downsample,
+  encodeWav,
   fitModel,
+  mouthAt,
   readiness,
   riskyTools,
   turnReducer,
@@ -182,5 +185,57 @@ describe('riskyTools', () => {
     ).toEqual(['codeAgent', 'exec', 'files', 'git'])
     expect(riskyTools({ memory: true })).toEqual([])
     expect(riskyTools(undefined)).toEqual([])
+  })
+})
+
+describe('encodeWav / downsample', () => {
+  test('writes a valid 16-bit mono PCM header and clamps samples', () => {
+    const bytes = encodeWav(new Float32Array([0, 0.5, -0.5, 2, -2]), 16000)
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const str = (o, n) => String.fromCharCode(...bytes.slice(o, o + n))
+    expect(str(0, 4)).toBe('RIFF')
+    expect(str(8, 4)).toBe('WAVE')
+    expect(str(12, 4)).toBe('fmt ')
+    expect(str(36, 4)).toBe('data')
+    expect(v.getUint16(22, true)).toBe(1) // mono
+    expect(v.getUint32(24, true)).toBe(16000)
+    expect(v.getUint16(34, true)).toBe(16)
+    expect(v.getUint32(40, true)).toBe(10) // 5 samples * 2 bytes
+    expect(v.getInt16(44, true)).toBe(0)
+    expect(v.getInt16(46, true)).toBe(16383)
+    expect(v.getInt16(50, true)).toBe(32767) // clamped
+    expect(v.getInt16(52, true)).toBe(-32768)
+  })
+  test('downsample halves a 32 kHz signal to 16 kHz', () => {
+    const src = new Float32Array(64).map((_, i) => i)
+    const out = downsample(src, 32000, 16000)
+    expect(out.length).toBe(32)
+    expect(out[1]).toBeCloseTo(2, 5)
+    expect(downsample(src, 16000, 16000)).toBe(src)
+  })
+})
+
+describe('mouthAt', () => {
+  const track = {
+    rate: 50,
+    frames: [
+      [0, 0],
+      [1, 0.5],
+      [0.5, -0.5],
+      [0, 0],
+    ],
+  }
+  test('interpolates openness and form between frames at the playback time', () => {
+    expect(mouthAt(track, 0)).toEqual({ open: 0, form: 0 })
+    expect(mouthAt(track, 0.02)).toEqual({ open: 1, form: 0.5 })
+    const mid = mouthAt(track, 0.03)
+    expect(mid.open).toBeCloseTo(0.75, 5)
+    expect(mid.form).toBeCloseTo(0, 5)
+  })
+  test('is closed before the start and after the end, and without a track', () => {
+    expect(mouthAt(track, -1)).toEqual({ open: 0, form: 0 })
+    expect(mouthAt(track, 9)).toEqual({ open: 0, form: 0 })
+    expect(mouthAt(null, 1)).toBeNull()
+    expect(mouthAt({ rate: 50, frames: [] }, 0)).toBeNull()
   })
 })

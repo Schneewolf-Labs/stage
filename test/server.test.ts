@@ -36,6 +36,10 @@ const voice = Bun.serve({
   async fetch(req) {
     const p = new URL(req.url).pathname
     if (p === '/health') return Response.json({ device: 'cpu', rvc: ['egirl'], loaded_rvc: [] })
+    if (p === '/transcribe') {
+      const n = (await req.arrayBuffer()).byteLength
+      return Response.json({ text: n > 44 ? 'hello from the mic' : '', seconds: 1.0, ms: 12 })
+    }
     if (p === '/tts') {
       voiceCalls.push(await req.json())
       return new Response(WAV, {
@@ -43,6 +47,15 @@ const voice = Bun.serve({
           'content-type': 'audio/wav',
           'x-audio-seconds': '1.00',
           'x-gen-seconds': '0.010',
+          // the per-clip mouth track the real service computes: 50 Hz frames of [open, form]
+          'x-mouth': JSON.stringify({
+            rate: 50,
+            frames: [
+              [0, 0],
+              [0.8, 0.2],
+              [0.3, -0.4],
+            ],
+          }),
         },
       })
     }
@@ -514,5 +527,59 @@ describe('twitch runtime', () => {
     const r = await post('/twitch', { paused: true })
     expect(r.status).toBe(400)
     expect((await get('/health')).twitch).toBeUndefined()
+  })
+})
+
+describe('transcribe', () => {
+  test('POST /transcribe proxies a WAV to the voice service and tells consoles', async () => {
+    const con = await client('console')
+    const r = await fetch(`${base}/transcribe`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+      body: WAV,
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.text).toBe('hello from the mic')
+    expect(j.seconds).toBe(1)
+    await con.waitFor((m) => m.type === 'transcript' && m.text === 'hello from the mic')
+    con.close()
+  })
+  test('POST /transcribe with send=1 also runs the text as a turn', async () => {
+    const con = await client('console')
+    const r = await fetch(`${base}/transcribe?send=1`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+      body: WAV,
+    })
+    expect((await r.json()).sent).toBe(true)
+    await con.waitFor(
+      (m) => m.type === 'turn' && m.phase === 'start' && m.message === 'hello from the mic',
+    )
+    con.close()
+  })
+  test('POST /transcribe rejects an empty body', async () => {
+    const r = await fetch(`${base}/transcribe`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+    })
+    expect(r.status).toBe(400)
+  })
+})
+
+describe('lipsync track', () => {
+  test('the speak cue carries the mouth track the voice service returned', async () => {
+    const page = await client()
+    await post('/say', { text: 'Track me.' })
+    const cue = await page.waitFor((m) => m.type === 'speak' && m.text === 'Track me.')
+    expect(cue.mouth).toEqual({
+      rate: 50,
+      frames: [
+        [0, 0],
+        [0.8, 0.2],
+        [0.3, -0.4],
+      ],
+    })
+    page.close()
   })
 })

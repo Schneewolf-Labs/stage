@@ -44,7 +44,13 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   const clip = await synthesize(voiceUrl, talent, line.text)
   if (stage.generation() !== gen) return // interrupted while synthesizing
   const { id, url } = stage.addClip(clip.wav, clip.seconds)
-  stage.cue({ type: 'speak', id, url, text: line.text })
+  stage.cue({
+    type: 'speak',
+    id,
+    url,
+    text: line.text,
+    ...(clip.mouth ? { mouth: clip.mouth } : {}),
+  })
   stage.event({
     type: 'clip',
     id,

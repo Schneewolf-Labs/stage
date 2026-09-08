@@ -4,7 +4,9 @@
                    -> audio/wav (24 kHz mono)
     POST /convert?rvc=egirl&pitch=12   body: a WAV file (any rate, mono or stereo)
                    -> audio/wav, the same speech in the RVC model's voice. For recorded voiceovers.
-    GET  /health   -> {"device": ..., "rvc": [...], "loaded_rvc": [...]}
+    POST /transcribe   body: a WAV (any rate) -> {"text": "...", "seconds": 3.2, "ms": 410}
+                   whisper.cpp (WHISPER_MODEL, default base.en) for the console's push-to-talk.
+    GET  /health   -> {"device": ..., "rvc": [...], "loaded_rvc": [...], "whisper": "base.en"}
 
 `pitch` is semitones of f0 shift into the model: a male voice into a female model usually wants
 +12, same-range voices 0.
@@ -31,6 +33,30 @@ RVC_MODELS = os.environ.get('RVC_MODELS', os.path.join(os.path.dirname(os.path.a
 lock = threading.Lock()
 pipeline = None
 rvc_cache = {}
+WHISPER_MODEL = os.environ.get('WHISPER_MODEL', 'base.en')
+whisper = None
+
+
+def load_whisper():
+    global whisper
+    if whisper is None:
+        from pywhispercpp.model import Model
+        whisper = Model(WHISPER_MODEL, print_progress=False, print_realtime=False)
+    return whisper
+
+
+def transcribe(audio, sr):
+    """Any-rate WAV samples -> text. whisper wants 16 kHz mono float32."""
+    mono = audio.mean(axis=1) if audio.ndim > 1 else audio
+    if sr != 16000:
+        n = int(np.ceil(len(mono) * 16000 / sr))
+        mono = np.interp(np.linspace(0, len(mono) - 1, n), np.arange(len(mono)), mono)
+    mono = mono.astype(np.float32)
+    segs = load_whisper().transcribe(mono)
+    import re
+    text = ' '.join(s.text.strip() for s in segs)
+    text = re.sub(r'\s*\[[A-Z_ ]+\]\s*', ' ', text).strip()  # whisper's [BLANK_AUDIO], [MUSIC] markers
+    return text, len(mono) / 16000
 
 
 def rvc_names():
@@ -74,6 +100,47 @@ def convert(audio, sr, rvc, pitch):
     return to_mono_24k(out, out_sr)
 
 
+MOUTH_RATE = 50
+
+
+def mouth_track(audio, sr=SR, rate=MOUTH_RATE):
+    """Lipsync frames for a clip: [openness 0..1, form -1..1] every 1/rate s.
+
+    Openness is a loudness envelope with a fast attack and slower release, normalised to the
+    clip's own peak so a quiet voice still opens the mouth. Form is the spectral tilt: energy
+    above ~1.5 kHz (e, i: wide) versus below (o, u: round), so the shape changes with the vowel.
+    Cheap, deterministic, and aligned to the audio clock on the page, unlike polling an analyser.
+    """
+    hop = sr // rate
+    win = np.hanning(hop * 2)
+    frames = []
+    freqs = np.fft.rfftfreq(len(win), 1 / sr)
+    hi = freqs >= 1500
+    for start in range(0, len(audio), hop):
+        seg = audio[start:start + len(win)]
+        if len(seg) < len(win):
+            seg = np.pad(seg, (0, len(win) - len(seg)))
+        seg = seg * win
+        rms = float(np.sqrt(np.mean(seg * seg)))
+        spec = np.abs(np.fft.rfft(seg)) ** 2
+        tot = float(spec.sum()) + 1e-9
+        tilt = float(spec[hi].sum()) / tot
+        frames.append([rms, tilt])
+    if not frames:
+        return {'rate': rate, 'frames': []}
+    env = np.array([f[0] for f in frames])
+    peak = float(np.percentile(env, 97)) or 1.0
+    env = np.clip(env / peak, 0, 1)
+    env = np.where(env < 0.06, 0, env)          # gate the noise floor
+    env = np.sqrt(env)                           # perceptual: small sounds still move the mouth
+    out, level = [], 0.0
+    for e, t in zip(env, (f[1] for f in frames)):
+        level = e if e > level else level * 0.55 + e * 0.45   # instant attack, ~40 ms release
+        form = (t - 0.18) * 4                                 # ~0.18 tilt is neutral speech
+        out.append([round(float(level), 2), round(float(max(-1, min(1, form))), 2) if e > 0.06 else 0])
+    return {'rate': rate, 'frames': out}
+
+
 def encode(audio):
     buf = io.BytesIO()
     sf.write(buf, audio, SR, format='WAV', subtype='PCM_16')
@@ -85,7 +152,8 @@ def tts(text, voice, rvc, speed, pitch=0):
     audio = np.concatenate([o.numpy() if hasattr(o, 'numpy') else np.asarray(o) for o in outs]).astype(np.float32)
     if rvc:
         audio = convert(audio, SR, rvc, pitch)
-    return encode(audio)
+    wav, dur = encode(audio)
+    return wav, dur, mouth_track(audio)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -101,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip('/') == '/health':
-            self._send(200, json.dumps({'device': DEVICE, 'rvc': rvc_names(), 'loaded_rvc': list(rvc_cache)}).encode())
+            self._send(200, json.dumps({'device': DEVICE, 'rvc': rvc_names(), 'loaded_rvc': list(rvc_cache), 'whisper': WHISPER_MODEL}).encode())
         else:
             self._send(404, b'{"error":"not found"}')
 
@@ -117,8 +185,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     return self._send(400, b'{"error":"text required"}')
                 with lock:
-                    wav, dur = tts(text, req.get('voice') or 'af_heart', req.get('rvc') or None,
-                                   float(req.get('speed') or 1.0), int(req.get('pitch') or 0))
+                    wav, dur, mouth = tts(text, req.get('voice') or 'af_heart', req.get('rvc') or None,
+                                          float(req.get('speed') or 1.0), int(req.get('pitch') or 0))
+            elif u.path.rstrip('/') == '/transcribe':
+                audio, sr = sf.read(io.BytesIO(self.rfile.read(n)), dtype='float32')
+                with lock:
+                    text, seconds = transcribe(audio, sr)
+                return self._send(200, json.dumps({'text': text, 'seconds': round(seconds, 2),
+                                                   'ms': round((time.perf_counter() - t0) * 1000)}).encode())
             elif u.path.rstrip('/') == '/convert':
                 q = parse_qs(u.query)
                 rvc = (q.get('rvc') or [''])[0]
@@ -126,7 +200,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, b'{"error":"rvc query param required"}')
                 audio, sr = sf.read(io.BytesIO(self.rfile.read(n)), dtype='float32')
                 with lock:
-                    wav, dur = encode(convert(audio, sr, rvc, int((q.get('pitch') or ['0'])[0])))
+                    out = convert(audio, sr, rvc, int((q.get('pitch') or ['0'])[0]))
+                    wav, dur = encode(out)
+                    mouth = mouth_track(out)
             else:
                 return self._send(404, b'{"error":"not found"}')
             self.send_response(200)
@@ -134,6 +210,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(wav)))
             self.send_header('X-Audio-Seconds', f'{dur:.2f}')
             self.send_header('X-Gen-Seconds', f'{time.perf_counter() - t0:.3f}')
+            if len(mouth['frames']) <= 4000:  # 80 s at 50 Hz; a sentence is a few seconds
+                self.send_header('X-Mouth', json.dumps(mouth, separators=(',', ':')))
             self.end_headers()
             self.wfile.write(wav)
         except Exception as e:  # report, never crash the service

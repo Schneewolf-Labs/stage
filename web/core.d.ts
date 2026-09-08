@@ -14,3 +14,7 @@ export function riskyTools(tools: Record<string, unknown> | undefined | null): s
 export interface ReadyItem { key: string; label: string; ok: boolean; detail: string }
 export function readiness(input: { health: Record<string, unknown> | undefined; egirl: Record<string, unknown> | undefined; modelLoaded?: boolean }): ReadyItem[]
 export type { Scene, Transform }
+export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
+export function downsample(samples: Float32Array, from: number, to: number): Float32Array
+export interface MouthTrack { rate: number; frames: [number, number][] }
+export function mouthAt(track: MouthTrack | null | undefined, t: number): { open: number; form: number } | null

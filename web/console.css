@@ -204,3 +204,6 @@ code { font-family: var(--mono); font-size: 12px }
 .field input[type=text], .field input:not([type]) { padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2); color: var(--text); outline: none }
 #scriptText { margin-bottom: 10px }
 .btn.on { color: #fff; background: var(--grad); border-color: transparent }
+
+.transcripts { display: flex; flex-direction: column; gap: 6px } .transcripts .line b { color: var(--accent) }
+#btnPtt.on { background: var(--err); border-color: var(--err); box-shadow: 0 0 18px rgba(255, 95, 135, .6) }

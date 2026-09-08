@@ -186,11 +186,17 @@ First, open the settings page.
     </section>
 
     <section class="pane" data-pane="mic">
-      <h2>Mic <span class="hint">planned</span></h2>
-      <p class="help">Speak as the talent yourself through the RVC voice. Recorded takes already work (<code>stage convert</code>); live passthrough needs a streaming converter and a virtual audio device.</p>
-      <label class="field"><span>Input device</span><select id="micSel"><option>—</option></select></label>
-      <div class="copyrow"><button class="btn primary" id="btnMicStart" disabled>Start live conversion</button><button class="btn ghost" id="btnMicRec" disabled>Record a take</button></div>
+      <h2>Mic</h2>
+      <h3>Talk to the talent</h3>
+      <p class="help">Hold to talk; release to transcribe. Hold <b>Space</b> anywhere outside a text box to do the same. Whisper runs in the voice service.</p>
+      <label class="field"><span>Input device</span><select id="micSel"><option value="">default</option></select></label>
+      <div class="copyrow"><button class="btn primary" id="btnPtt">Hold to talk</button><span class="help" id="micStatus" style="margin:0">idle</span></div>
       <div class="meter wide"><div class="meter-fill" id="micLevel"></div></div>
+      <label class="field row" style="margin-top:12px"><input type="checkbox" id="micAuto" checked><span>Send as a turn right away (otherwise it lands in the composer to edit)</span></label>
+      <h3>Heard</h3>
+      <div class="transcripts" id="transcripts"><div class="empty">Nothing yet.</div></div>
+      <h3>Speak as the talent <span class="hint">planned</span></h3>
+      <p class="help">Live passthrough of your voice through the RVC model needs a streaming converter and a virtual audio device. Recorded takes already work: <code>stage convert take.wav out.wav</code>.</p>
     </section>
 
     <section class="pane" data-pane="settings">

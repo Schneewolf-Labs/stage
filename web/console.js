@@ -2,7 +2,7 @@
  * announced as a console so it also receives turn events. State logic lives in core.js
  * (tested); this file is wiring and DOM. Parameter ranges and live values are read straight
  * out of the preview iframe, which is the real render page with sound muted. */
-import { clampTransform, clipStats, readiness, riskyTools, turnReducer } from './core.js'
+import { clampTransform, clipStats, downsample, encodeWav, readiness, riskyTools, turnReducer } from './core.js'
 
 const $ = (id) => document.getElementById(id)
 const app = document.querySelector('.app')
@@ -80,6 +80,7 @@ function tick() {
   const st = preview.contentWindow?.stage
   const m = st?.model
   $('levelFill').style.width = `${Math.round((st?.level || 0) * 100)}%`
+  if (mic.recording && mic.analyser) { const b = new Uint8Array(mic.analyser.fftSize); mic.analyser.getByteTimeDomainData(b); let sum = 0; for (const v of b) { const d = (v - 128) / 128; sum += d * d } $('micLevel').style.width = `${Math.min(100, Math.sqrt(sum / b.length) * 400)}%` } else $('micLevel').style.width = '0'
   if (m && S.params.length) {
     const core = m.internalModel.coreModel
     for (const p of S.params) {
@@ -249,8 +250,60 @@ $('btnBrainRefresh').addEventListener('click', loadBrain)
 $('thinkSel').addEventListener('change', () => post('/egirl/thinking', { level: $('thinkSel').value }).then((r) => toast(r.error ? r.error : `Thinking: ${$('thinkSel').value}`)))
 $('btnAbortTurn').addEventListener('click', () => post('/interrupt').then((r) => toast(r.aborted ? 'Turn aborted' : 'Nothing to abort')))
 
-/* ---------- mic panel (stub with real device list) ---------- */
-navigator.mediaDevices?.enumerateDevices?.().then((ds) => { const sel = $('micSel'); sel.innerHTML = ''; const ins = ds.filter((d) => d.kind === 'audioinput'); for (const d of ins) sel.appendChild(new Option(d.label || `microphone ${sel.length + 1}`, d.deviceId)); if (!ins.length) sel.appendChild(new Option('no input devices (grant mic permission)', '')) }).catch(() => {})
+/* ---------- mic panel: push-to-talk -> WAV -> /transcribe ---------- */
+const mic = { ctx: null, stream: null, source: null, proc: null, analyser: null, chunks: [], recording: false, level: 0 }
+async function listMics() {
+  const sel = $('micSel'); const cur = sel.value
+  const ds = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []) || []
+  sel.innerHTML = '<option value="">default</option>'
+  for (const d of ds.filter((d) => d.kind === 'audioinput')) sel.appendChild(new Option(d.label || `microphone ${sel.length}`, d.deviceId))
+  sel.value = cur
+}
+listMics()
+async function micStart() {
+  if (mic.recording) return
+  try {
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: $('micSel').value || undefined, echoCancellation: true, noiseSuppression: true } })
+  } catch (e) { $('micStatus').textContent = `mic: ${e.message}`; return }
+  listMics() // labels appear once permission is granted
+  mic.ctx = mic.ctx || new (window.AudioContext || window.webkitAudioContext)()
+  await mic.ctx.resume()
+  mic.source = mic.ctx.createMediaStreamSource(mic.stream)
+  mic.analyser = mic.ctx.createAnalyser(); mic.analyser.fftSize = 512
+  mic.proc = mic.ctx.createScriptProcessor(4096, 1, 1)
+  mic.chunks = []
+  mic.proc.onaudioprocess = (e) => { if (mic.recording) mic.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))) }
+  mic.source.connect(mic.analyser); mic.analyser.connect(mic.proc); mic.proc.connect(mic.ctx.destination)
+  mic.recording = true
+  $('btnPtt').classList.add('on'); $('btnPtt').textContent = 'Listening… release to send'; $('micStatus').textContent = 'recording'
+}
+async function micStop() {
+  if (!mic.recording) return
+  mic.recording = false
+  $('btnPtt').classList.remove('on'); $('btnPtt').textContent = 'Hold to talk'; $('micStatus').textContent = 'transcribing…'
+  mic.proc.disconnect(); mic.analyser.disconnect(); mic.source.disconnect()
+  for (const t of mic.stream.getTracks()) t.stop()
+  const n = mic.chunks.reduce((a, c) => a + c.length, 0)
+  const all = new Float32Array(n); let o = 0; for (const c of mic.chunks) { all.set(c, o); o += c.length }
+  if (n < mic.ctx.sampleRate * 0.3) { $('micStatus').textContent = 'too short'; return }
+  const wav = encodeWav(downsample(all, mic.ctx.sampleRate, 16000), 16000)
+  try {
+    const r = await fetch(`/transcribe${$('micAuto').checked ? '?send=1' : ''}`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav }).then((x) => x.json())
+    if (r.error) { $('micStatus').textContent = r.error; return }
+    $('micStatus').textContent = r.text ? `${r.seconds.toFixed(1)}s → ${r.ms} ms` : 'heard nothing'
+    if (r.text && !r.sent) { composer.value = r.text; composer.focus() }
+    if (r.sent) showPanel('chat')
+  } catch (e) { $('micStatus').textContent = `failed: ${e.message}` }
+}
+$('btnPtt').addEventListener('pointerdown', (e) => { e.preventDefault(); micStart() })
+for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('btnPtt').addEventListener(ev, micStop)
+document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) { e.preventDefault(); micStart() } })
+document.addEventListener('keyup', (e) => { if (e.code === 'Space' && mic.recording) { e.preventDefault(); micStop() } })
+function onTranscript(ev) {
+  $('transcripts').querySelector('.empty')?.remove()
+  const line = el('div', 'line'); line.append(el('b', null, ev.sent ? 'sent ' : 'heard '), document.createTextNode(ev.text || '(nothing)'))
+  $('transcripts').prepend(line); while ($('transcripts').children.length > 30) $('transcripts').lastChild.remove()
+}
 
 /* ---------- chat panel (rendered from the reducer) ---------- */
 function renderTurns() {
@@ -366,6 +419,7 @@ function connect() {
       case 'chat': onChat(ev); break
       case 'script': onScript(ev); break
       case 'director': onDirector(ev); break
+      case 'transcript': onTranscript(ev); break
       case 'clip': addClipStat(ev); onEvent(ev); break
       case 'speak': case 'playing': case 'spoke': case 'stop': case 'turn': case 'reasoning': case 'token': case 'tool': case 'tool_done': onEvent(ev); break
     }

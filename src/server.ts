@@ -21,7 +21,7 @@ import {
 import { ScriptRunner } from './script'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { ConsoleEvent, StageCue, StageReport } from './types'
-import { voiceHealth } from './voice'
+import { transcribe, voiceHealth } from './voice'
 
 const WEB_DIR = resolve(import.meta.dir, '../web')
 const MAX_CLIPS = 64
@@ -221,6 +221,18 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           })
         if (path === '/egirl') return json(await brain(talent))
         return serveUnder(WEB_DIR, path)
+      }
+      if (req.method === 'POST' && path === '/transcribe') {
+        // Raw WAV body from the console's push-to-talk. ?send=1 runs the text as a turn.
+        const wav = await req.arrayBuffer()
+        if (wav.byteLength <= 44) return json({ error: 'a WAV body is required' }, 400)
+        const t = await transcribe(cfg.voice.url, wav).catch((e: Error) => ({ error: e.message }))
+        if ('error' in t) return json(t, 502)
+        const send = url.searchParams.get('send') === '1' && !!t.text.trim()
+        stage.event({ type: 'transcript', text: t.text, seconds: t.seconds, sent: send })
+        log(`heard (${t.seconds.toFixed(1)}s): ${t.text || '(nothing)'}`)
+        if (send) runTurn(t.text).catch((e) => log(`mic turn failed: ${e}`))
+        return json({ ...t, sent: send })
       }
       if (req.method === 'POST') {
         const body = (await req.json().catch(() => ({}))) as Record<string, unknown>

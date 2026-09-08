@@ -1,6 +1,8 @@
 kokoro>=0.9.4
 rvc-python
 soundfile
+# whisper.cpp for the console's push-to-talk transcription
+pywhispercpp
 numpy
 # uv/venv ships without pkg_resources; rvc-python and fairseq import it
 setuptools<70

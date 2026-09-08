@@ -65,6 +65,12 @@ never from the `speak` cue, which only means "queued".
   `beforeModelUpdate` hook, and drive head/body through `focusController`.
 - Hidden browser tabs pause `requestAnimationFrame`; the page keeps a `setInterval` fallback.
 - Models without `.exp3` files (e.g. chb119) get moods by setting brow/eye/mouth params directly.
+- Reading a Cubism parameter between frames returns the *saved* value (often 0), not what was
+  drawn: `loadParameters()` runs at the top of every update. Measure inside the update hook, or
+  read the page's own variables (`window.stage.level`), never `getParameterValueByIndex` from
+  outside for verification.
+- Lipsync is the clip's mouth track at the audio clock (`mouthAt`), not the analyser; the analyser
+  is the fallback. Do not "improve" it by smoothing the analyser harder.
 
 ## Voice Service Gotchas
 

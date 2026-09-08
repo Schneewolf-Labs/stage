@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, fitModel } from './core.js'
+import { clampTransform, fitModel, mouthAt } from './core.js'
 
 const q = new URLSearchParams(location.search)
 const editable = q.get('edit') === '1'
@@ -48,6 +48,9 @@ let expressions = {}, expWeight = {}
 let mood = 'neutral', state = 'idle', poseOn = 0, nodT = -1
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1 }
 let mouth = 0, analyser = null, ac = null
+// Lipsync: a clip's mouth track (from the voice service) is read at the audio clock; the
+// analyser is only the fallback for clips without one. See core.mouthAt.
+let track = null, trackStart = 0, form = 0
 const muted = q.get('mute') === '1'
 const pinned = {} // param id -> value from the console's sliders; applied last, released with null
 
@@ -85,14 +88,18 @@ async function load(url) {
     for (const k in cur) cur[k] = lerp(cur[k], target[k], 0.08)
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
     set('ParamBrowLY', cur.bl); set('ParamBrowRY', cur.br); set('ParamBrowLAngle', cur.ba); set('ParamBrowRAngle', cur.ba)
-    set('ParamMouthForm', cur.form)
-    let level = 0
-    if (analyser) {
+    let level = 0, targetForm = 0
+    const tracked = track && ac ? mouthAt(track, ac.currentTime - trackStart - (ac.outputLatency || ac.baseLatency || 0)) : null
+    if (tracked) { level = tracked.open; targetForm = tracked.form }
+    else if (analyser) {
       const b = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(b)
       let s = 0; for (const v of b) { const d = (v - 128) / 128; s += d * d }
       level = Math.min(1, Math.sqrt(s / b.length) * 6)
     }
-    mouth = lerp(mouth, level, level > mouth ? 0.6 : 0.25); set('ParamMouthOpenY', mouth)
+    mouth = lerp(mouth, level, tracked ? 0.7 : level > mouth ? 0.6 : 0.25); set('ParamMouthOpenY', mouth)
+    // Vowel shape rides on top of the mood's mouth form only while the mouth is open.
+    form = lerp(form, targetForm * Math.min(1, mouth * 2), 0.3)
+    set('ParamMouthForm', cur.form + form * 0.7)
     for (const name in expressions) {
       expWeight[name] = lerp(expWeight[name] || 0, name === mood ? 1 : 0, 0.1)
       const w = expWeight[name]; if (w < 0.005) continue
@@ -126,15 +133,16 @@ async function pump() {
     if (ac.state !== 'running') await ac.resume()
     const buf = await ac.decodeAudioData(await (await fetch(cue.url)).arrayBuffer())
     const src = ac.createBufferSource(); src.buffer = buf; current = src
+    track = cue.mouth || null
     analyser = ac.createAnalyser(); analyser.fftSize = 512
     src.connect(analyser)
     if (muted) { const g = ac.createGain(); g.gain.value = 0; analyser.connect(g); g.connect(ac.destination) }
     else analyser.connect(ac.destination)
     if (showCaptions()) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
     send({ type: 'playing', id: cue.id })
-    await new Promise((res) => { src.onended = res; src.start() })
+    await new Promise((res) => { src.onended = res; trackStart = ac.currentTime; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
-  analyser = null; current = null; captionEl.style.display = 'none'
+  analyser = null; current = null; track = null; captionEl.style.display = 'none'
   send({ type: 'spoke', id: cue.id })
   playing = false
   pump()
@@ -233,4 +241,4 @@ connect()
 // Autoplay policy: audio needs one user gesture in a normal browser tab. OBS's browser source
 // does not enforce it. Any click on the page unlocks the AudioContext.
 document.addEventListener('click', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume() })
-window.stage = { apply, get model() { return model }, get level() { return mouth }, get transform() { return transform } }
+window.stage = { apply, get model() { return model }, get level() { return mouth }, get form() { return form }, get tracked() { return !!track }, get transform() { return transform } }

@@ -1,4 +1,5 @@
 import type { Director, Scene, Transform } from './persist'
+import type { MouthTrack } from './voice'
 
 /** Events egirl's `POST /chat` (stream: true) emits as SSE `data:` frames. */
 export type EgirlEvent =
@@ -33,7 +34,7 @@ export type StageCue =
   | { type: 'transform'; x: number; y: number; scale: number }
   /** Idle motion, captions and background settings. */
   | { type: 'scene'; scene: Scene }
-  | { type: 'speak'; id: string; url: string; text: string }
+  | { type: 'speak'; id: string; url: string; text: string; mouth?: MouthTrack }
   | { type: 'mood'; mood: Mood }
   | { type: 'state'; state: StageState; detail?: string }
   | { type: 'gesture'; name: 'nod' | 'pose' }
@@ -89,6 +90,8 @@ export type ConsoleEvent =
   | { type: 'script'; phase: 'start' | 'line' | 'done' | 'stopped'; index?: number; total: number }
   /** The director fired its prompt. */
   | { type: 'director'; phase: 'fired' | 'skipped'; reason?: string }
+  /** What the mic heard (console push-to-talk), whether or not it was sent as a turn. */
+  | { type: 'transcript'; text: string; seconds: number; sent: boolean }
   | { type: 'log'; text: string }
   | { type: 'logs'; lines: string[] }
 

@@ -72,8 +72,19 @@ the scene's *screen*, a placeable area next to the model, with its alt text as c
 else can put a picture there with `POST /image`. This is how an image-generating talent shows
 her work on stream.
 
-Planned and stubbed in the UI: mic passthrough (live RVC on your own voice), clip recording,
-named scene presets, custom hotkeys.
+**Mic.** Push-to-talk in the console (hold the button or Space): the browser records, encodes a
+16 kHz WAV, and the voice service transcribes it with whisper.cpp. The text is sent as a turn
+right away or dropped into the composer to edit. This is the co-host workflow: a human talking
+with the talent on stream.
+
+**Lipsync.** The voice service returns a mouth track with every clip: 50 frames a second of
+openness (a loudness envelope, normalised per clip, fast attack, short release) and shape (the
+spectral tilt: wide for e/i, round for o/u). The page reads it at the audio clock, output
+latency compensated, so the mouth is on the syllable rather than trailing a loudness meter.
+Clips without a track fall back to the live analyser.
+
+Planned and stubbed in the UI: live RVC passthrough of your own voice, clip recording, named
+scene presets, custom hotkeys.
 
 ### Which workflow needs what
 
@@ -122,6 +133,7 @@ chat, cue tags stripped.
 | POST | `/director` | `{enabled?, interval_s?, prompt?}` | the auto-prompt loop, saved; `/director/run` fires it once |
 | POST | `/image` | `{url, caption?, seconds?}` | show a picture on the screen area; `url: null` clears |
 | POST | `/twitch` | `{paused?, reply?}` | runtime chat toggles (400 without a twitch table) |
+| POST | `/transcribe[?send=1]` | WAV body | speech to text via the voice service; `send=1` runs it as a turn |
 | GET | `/egirl` | | the talent's egirl `/info` and session context, for the Brain panel |
 | POST | `/egirl/thinking` | `{level}` | set the session's thinking level (off/low/medium/high) |
 | GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
@@ -133,7 +145,8 @@ chat, cue tags stripped.
 ## Voice Service
 
 `services/voice/` is a small Python HTTP server: Kokoro-82M for the read (~40 ms to first audio
-on a GPU), optional RVC for the character's timbre. Put an RVC model in
+on a GPU), optional RVC for the character's timbre, whisper.cpp for the mic (`WHISPER_MODEL`,
+default `base.en`), and a lipsync track computed for every clip. Put an RVC model in
 `services/voice/models/<name>/` (one `.pth`, optional `.index`) and name it in the talent's
 `rvc =`, with `pitch =` in semitones when the base voice sits in a different range than the
 model. `POST /convert` (and `stage convert`) runs a recorded WAV through the same model, for
