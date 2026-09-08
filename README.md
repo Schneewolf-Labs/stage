@@ -32,7 +32,7 @@ bun run voice
 # 2. stage server
 bun run serve --talent springfield
 
-# 3. open http://127.0.0.1:3100/  (add ?bg=1 outside OBS to see the background)
+# 3. open the console at http://127.0.0.1:3100/console  (the render page itself is http://127.0.0.1:3100/)
 bun run src/index.ts say "Testing, testing. [happy] Is this thing on?"
 bun run src/index.ts chat "What are you working on today?"
 bun run src/index.ts stop                                    # cut her off mid-sentence
@@ -42,6 +42,16 @@ bun run src/index.ts convert take1.wav take1-egirl.wav --rvc egirl --pitch 12   
 In OBS add a **Browser** source with the stage URL, 1920x1080, and it renders with a transparent
 background. Any normal browser tab needs one click on the page before audio plays (autoplay
 policy); OBS does not.
+
+## Console
+
+`/console` is the operator's view of one talent: a live preview of the actual render page (muted,
+same cues), the talent's state, a level meter and latency readouts, and panels for the model
+(picker with hot-swap, expressions, every Cubism parameter as a live slider you can pin), the
+voice (Kokoro voice, RVC model, pitch, speed, a test line, per-clip latency), the chat (each
+turn as a timeline: reasoning, tool calls, sentences lighting up as they are spoken, timing),
+Twitch (connection, queue, live lines) and setup (OBS URL, talents, shortcuts, health). Moods
+and gestures are one click or one key away; Esc stops the talent mid-sentence.
 
 ## Cue Tags
 
@@ -72,6 +82,11 @@ chat, cue tags stripped.
 | POST | `/say` | `{text}` | speak text directly (cue tags honored), no egirl |
 | POST | `/cue` | a cue object | raw cue passthrough, e.g. `{"type":"mood","mood":"sad"}` |
 | POST | `/interrupt` | | stop talking now: cut audio, drop queued clips, abort the egirl turn |
+| POST | `/model` | `{model}` | hot-swap the Live2D model (path under models_dir) on every page |
+| POST | `/voice` | `{voice?, rvc?, pitch?, speed?}` | live voice settings for the next sentence (not persisted) |
+| GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
+| GET | `/talent` | | the running talent's settings and the names of all configured talents |
+| GET | `/console` | | the operator console |
 | GET | `/health` | | stage + voice service status, plus Twitch connection and queue when configured |
 | WS | `/ws` | | what the page listens on |
 
@@ -110,7 +125,8 @@ src/
   chunker.ts    sentence splitter + cue-tag parser
   performer.ts  egirl events -> voice -> cues
   voice.ts      voice service client
-web/            the page (index.html + stage.js) and vendored Live2D/Pixi libs
+  models.ts     model + .exp3 discovery under models_dir
+web/            render page (index.html + stage.js), console (console.html/css/js), vendored libs
 services/voice/ Kokoro + RVC HTTP service
 test/           bun test
 ```

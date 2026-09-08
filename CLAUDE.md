@@ -38,10 +38,20 @@ chunker and the cue-tag parser.
 | Runtime | Bun, TypeScript (strict) |
 | Server | `Bun.serve` with WebSocket, ~200 lines |
 | Page | plain JS, PixiJS 7 + pixi-live2d-display 0.5 (lipsync fork) + Cubism Core, vendored in `web/libs` |
+| Console | `web/console.{html,css,js}`, plain JS, one hand-written design system, no framework |
 | Voice | Python `services/voice/`: Kokoro-82M + rvc-python, plain `http.server` |
 | Config | TOML via `smol-toml`, validated by hand in `config.ts` |
 
 Dependencies are deliberately minimal (`smol-toml` only at runtime). Ask before adding one.
+
+## Two Kinds of WebSocket Client
+
+A render page and the console share `/ws`. A client is a page until it sends
+`{type:'ready', role:'console'}`. Cues go to everyone; `ConsoleEvent`s (turn progress, clips,
+chat lines, talent settings) go to consoles only. The console's preview is a real render page in
+an iframe (`?mute=1&status=0&caption=0`), which is also where it reads parameter ranges and live
+values from: same origin, no extra protocol. "Now speaking" comes from a page's `playing` report,
+never from the `speak` cue, which only means "queued".
 
 ## Live2D Gotchas (load-bearing)
 

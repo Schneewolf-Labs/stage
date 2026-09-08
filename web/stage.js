@@ -1,7 +1,9 @@
 /* Stage page: renders one Live2D talent and applies cues from the server over a WebSocket.
  *
  * Query params:  ?bg=1 paints the brand background (default is transparent for OBS);
- *                ?status=0 hides the debug status line.
+ *                ?status=0 hides the debug status line;
+ *                ?mute=1 keeps lipsync but plays no sound (the console's preview);
+ *                ?caption=0 hides the on-page caption (the console draws its own).
  *
  * Three things about pixi-live2d-display 0.5 that are easy to get wrong:
  *  1. The bundle needs the Cubism 2 runtime (live2d.min.js) loaded even for Cubism 4 models.
@@ -12,6 +14,7 @@
 const q = new URLSearchParams(location.search)
 if (q.get('bg') === '1') document.body.classList.add('opaque')
 if (q.get('status') === '0') document.getElementById('status').classList.add('hidden')
+const showCaptions = q.get('caption') !== '0'
 const statusEl = document.getElementById('status')
 const captionEl = document.getElementById('caption')
 const status = (s) => { statusEl.textContent = s }
@@ -35,6 +38,8 @@ let expressions = {}, expWeight = {}
 let mood = 'neutral', state = 'idle', poseOn = 0, nodT = -1
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1 }
 let mouth = 0, analyser = null, ac = null
+const muted = q.get('mute') === '1'
+const pinned = {} // param id -> value from the console's sliders; applied last, released with null
 
 const set = (id, v) => { const i = pidx[id]; if (i !== undefined) model.internalModel.coreModel.setParameterValueByIndex(i, v) }
 
@@ -83,6 +88,7 @@ async function load(url) {
       }
     }
     set('Param', poseOn) // chb119's pose toggle; harmless on models without it
+    for (const id in pinned) set(id, pinned[id])
   })
   model = m
   status(`model ${url}\nparams ${Object.keys(pidx).length}`)
@@ -105,8 +111,11 @@ async function pump() {
     const buf = await ac.decodeAudioData(await (await fetch(cue.url)).arrayBuffer())
     const src = ac.createBufferSource(); src.buffer = buf; current = src
     analyser = ac.createAnalyser(); analyser.fftSize = 512
-    src.connect(analyser); analyser.connect(ac.destination)
-    captionEl.textContent = cue.text; captionEl.style.display = 'block'
+    src.connect(analyser)
+    if (muted) { const g = ac.createGain(); g.gain.value = 0; analyser.connect(g); g.connect(ac.destination) }
+    else analyser.connect(ac.destination)
+    if (showCaptions) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
+    send({ type: 'playing', id: cue.id })
     await new Promise((res) => { src.onended = res; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
   analyser = null; current = null; captionEl.style.display = 'none'
@@ -140,6 +149,7 @@ function apply(cue) {
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break
     case 'stop': queue.length = 0; if (current) { try { current.stop() } catch {} } break
+    case 'param': if (cue.value === null) delete pinned[cue.id]; else pinned[cue.id] = cue.value; break
   }
 }
 
@@ -157,4 +167,4 @@ connect()
 // Autoplay policy: audio needs one user gesture in a normal browser tab. OBS's browser source
 // does not enforce it. Any click on the page unlocks the AudioContext.
 document.addEventListener('click', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume() })
-window.stage = { apply, get model() { return model } }
+window.stage = { apply, get model() { return model }, get level() { return mouth } }

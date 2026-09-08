@@ -1,7 +1,7 @@
 import { type Gesture, parseLine, SentenceChunker } from './chunker'
 import type { TalentConfig } from './config'
 import { chat } from './egirl'
-import type { StageCue } from './types'
+import type { ConsoleEvent, StageCue } from './types'
 import { synthesize } from './voice'
 
 export interface Stage {
@@ -9,6 +9,8 @@ export interface Stage {
   cue(c: StageCue): void
   /** Bumped by an interrupt; a clip whose turn is older than this is dropped instead of spoken. */
   generation(): number
+  /** Tell consoles what is happening. Pages never see these. */
+  event(e: ConsoleEvent): void
   /** Store a clip and return the URL the page fetches it from. `seconds` bounds how long it counts as speaking. */
   addClip(wav: ArrayBuffer, seconds: number): { id: string; url: string }
 }
@@ -36,6 +38,13 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   if (stage.generation() !== gen) return // interrupted while synthesizing
   const { id, url } = stage.addClip(clip.wav, clip.seconds)
   stage.cue({ type: 'speak', id, url, text: line.text })
+  stage.event({
+    type: 'clip',
+    id,
+    text: line.text,
+    seconds: clip.seconds,
+    genMs: Math.round(performance.now() - t0),
+  })
   log?.(
     `spoke ${clip.seconds.toFixed(1)}s in ${((performance.now() - t0) / 1000).toFixed(2)}s: ${line.text}`,
   )
@@ -49,6 +58,8 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
 export async function perform(opts: PerformOptions, message: string): Promise<string> {
   const { stage, talent, log } = opts
   const chunker = new SentenceChunker()
+  const t0 = performance.now()
+  stage.event({ type: 'turn', phase: 'start', message })
   let reply = ''
   let thinking = false
   let speaking = Promise.resolve()
@@ -58,14 +69,20 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
   }
   try {
     for await (const ev of chat(talent, message)) {
-      if (ev.t === 'reasoning' && !thinking) {
-        thinking = true
-        stage.cue({ type: 'state', state: 'thinking' })
+      if (ev.t === 'reasoning') {
+        stage.event({ type: 'reasoning', v: ev.v })
+        if (!thinking) {
+          thinking = true
+          stage.cue({ type: 'state', state: 'thinking' })
+        }
       } else if (ev.t === 'tool') {
+        stage.event({ type: 'tool', v: ev.v })
         stage.cue({ type: 'state', state: 'working', detail: ev.v.join(', ') })
       } else if (ev.t === 'tool_done') {
+        stage.event({ type: 'tool_done', v: ev.v })
         stage.cue({ type: 'state', state: 'thinking', detail: `${ev.v} done` })
       } else if (ev.t === 'token') {
+        stage.event({ type: 'token', v: ev.v })
         if (!reply) stage.cue({ type: 'state', state: 'idle' })
         reply += ev.v
         for (const s of chunker.push(ev.v)) say(s)
@@ -78,11 +95,20 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
         throw new Error(ev.message ?? 'egirl stream error')
       }
     }
+  } catch (e) {
+    stage.event({
+      type: 'turn',
+      phase: 'error',
+      message: String(e),
+      ms: Math.round(performance.now() - t0),
+    })
+    throw e
   } finally {
     const rest = chunker.flush()
     if (rest) say(rest)
     await speaking
     stage.cue({ type: 'state', state: 'idle' })
   }
+  stage.event({ type: 'turn', phase: 'done', reply, ms: Math.round(performance.now() - t0) })
   return reply
 }

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Stage · console</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="console.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cdefs%3E%3ClinearGradient id=%27g%27 x1=%270%27 y1=%270%27 x2=%271%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23af5fd7%27/%3E%3Cstop offset=%271%27 stop-color=%27%23ff5faf%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2732%27 height=%2732%27 rx=%279%27 fill=%27url(%23g)%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%277%27 fill=%27none%27 stroke=%27%23fff%27 stroke-width=%273%27 stroke-dasharray=%2733 11%27 transform=%27rotate(-30 16 16)%27/%3E%3C/svg%3E">
+</head><body>
+<div class="app" data-panel="model">
+  <nav class="rail" aria-label="Sections">
+    <a class="logo" href="/console" title="Stage"><span class="logo-mark"></span></a>
+    <button class="rail-btn" data-panel="model" title="Model (M)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>Model</span></button>
+    <button class="rail-btn" data-panel="voice" title="Voice (V)"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Voice</span></button>
+    <button class="rail-btn" data-panel="chat" title="Chat (C)"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Chat</span></button>
+    <button class="rail-btn" data-panel="twitch" title="Twitch (T)"><svg viewBox="0 0 24 24"><path d="M5 3h15v11l-4 4h-4l-3 3v-3H5z"/><path d="M11 8v4M15 8v4"/></svg><span>Twitch</span></button>
+    <button class="rail-btn" data-panel="settings" title="Settings (S)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg><span>Setup</span></button>
+    <div class="rail-spacer"></div>
+    <div class="rail-health" id="railHealth" title="Health"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+  </nav>
+
+  <main class="viewport">
+    <div class="aurora" aria-hidden="true"></div>
+    <header class="hud">
+      <div class="talent">
+        <span class="avatar" id="talentAvatar">S</span>
+        <div><div class="talent-name" id="talentName">—</div><div class="talent-model" id="talentModel">connecting…</div></div>
+      </div>
+      <div class="state" id="statePill" data-state="idle"><span class="state-dot"></span><span id="stateText">idle</span></div>
+      <div class="meter" title="Mouth level"><div class="meter-fill" id="levelFill"></div></div>
+      <div class="readouts">
+        <div class="readout"><span class="k">ttfa</span><span class="v" id="roTtfa">—</span></div>
+        <div class="readout"><span class="k">synth</span><span class="v" id="roSynth">—</span></div>
+        <div class="readout"><span class="k">rtf</span><span class="v" id="roRtf">—</span></div>
+      </div>
+      <div class="hud-actions">
+        <button class="icon-btn" id="btnBg" title="Toggle checkerboard (transparent preview)"><svg viewBox="0 0 24 24"><path d="M4 4h8v8H4zM12 12h8v8h-8z"/><path d="M12 4h8v8h-8zM4 12h8v8H4z" opacity=".35"/></svg></button>
+        <button class="icon-btn" id="btnCopy" title="Copy OBS browser-source URL"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5h10"/></svg></button>
+        <a class="icon-btn" id="btnOpen" href="/" target="_blank" title="Open render page"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg></a>
+      </div>
+    </header>
+
+    <div class="stage-frame" id="stageFrame">
+      <iframe id="preview" src="/?mute=1&status=0&caption=0" title="Live preview"></iframe>
+      <div class="caption" id="caption"></div>
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <footer class="transport">
+      <div class="chips">
+        <button class="chip" data-mood="neutral">neutral</button>
+        <button class="chip" data-mood="happy">happy</button>
+        <button class="chip" data-mood="sad">sad</button>
+        <button class="chip" data-mood="angry">angry</button>
+        <button class="chip" data-mood="surprised">surprised</button>
+        <span class="chip-sep"></span>
+        <button class="chip" data-gesture="nod">nod</button>
+        <button class="chip" data-gesture="pose">pose</button>
+      </div>
+      <div class="composer">
+        <textarea id="composer" rows="1" placeholder="Talk to the talent… (Enter to send, Shift+Enter for a new line, Esc to stop)"></textarea>
+        <button class="btn ghost" id="btnSay" title="Speak this text directly, no egirl">Say</button>
+        <button class="btn primary" id="btnSend" title="Send to egirl and perform the reply">Send</button>
+        <button class="btn danger" id="btnStop" title="Stop (Esc)">Stop</button>
+      </div>
+    </footer>
+  </main>
+
+  <aside class="panel">
+    <section class="pane" data-pane="model">
+      <h2>Model</h2>
+      <div class="model-grid" id="modelGrid"></div>
+      <h3>Expressions <span class="hint" id="exprHint"></span></h3>
+      <div class="expr-list" id="exprList"></div>
+      <h3>Parameters <button class="link" id="btnRelease">release all</button></h3>
+      <div class="params" id="params"></div>
+    </section>
+
+    <section class="pane" data-pane="voice">
+      <h2>Voice</h2>
+      <label class="field"><span>Kokoro voice</span><select id="voiceSel"></select></label>
+      <label class="field"><span>RVC model</span><select id="rvcSel"><option value="">off (raw Kokoro)</option></select></label>
+      <label class="field range"><span>Pitch <b id="pitchVal">0</b> st</span><input type="range" id="pitch" min="-12" max="12" step="1" value="0"></label>
+      <label class="field range"><span>Speed <b id="speedVal">1.00</b>×</span><input type="range" id="speed" min="0.7" max="1.4" step="0.05" value="1"></label>
+      <div class="test-line">
+        <input id="testLine" value="Testing, testing. Is this thing on?">
+        <button class="btn ghost" id="btnTest">Test</button>
+      </div>
+      <h3>Latency</h3>
+      <div class="stats" id="voiceStats">
+        <div><span class="k">clips</span><span class="v" id="stClips">0</span></div>
+        <div><span class="k">last synth</span><span class="v" id="stSynth">—</span></div>
+        <div><span class="k">last audio</span><span class="v" id="stAudio">—</span></div>
+        <div><span class="k">avg rtf</span><span class="v" id="stRtf">—</span></div>
+      </div>
+      <div class="spark" id="spark"></div>
+    </section>
+
+    <section class="pane" data-pane="chat">
+      <h2>Chat <button class="link" id="btnClearChat">clear</button></h2>
+      <div class="timeline" id="timeline"><div class="empty">No turns yet. Send a message below.</div></div>
+    </section>
+
+    <section class="pane" data-pane="twitch">
+      <h2>Twitch</h2>
+      <div class="stats" id="twStats">
+        <div><span class="k">status</span><span class="v" id="twStatus">not configured</span></div>
+        <div><span class="k">queued</span><span class="v" id="twQueued">—</span></div>
+        <div><span class="k">dropped</span><span class="v" id="twDropped">—</span></div>
+        <div><span class="k">sent</span><span class="v" id="twSent">—</span></div>
+      </div>
+      <div class="chatlog" id="chatlog"><div class="empty" id="twEmpty">Add a <code>[talents.&lt;name&gt;.twitch]</code> table to stage.toml to listen to a channel.</div></div>
+    </section>
+
+    <section class="pane" data-pane="settings">
+      <h2>Setup</h2>
+      <h3>OBS</h3>
+      <p class="help">Add a <b>Browser</b> source, 1920×1080, with this URL. The page is transparent and needs no click to play audio inside OBS.</p>
+      <div class="copyrow"><code id="obsUrl"></code><button class="btn ghost" id="btnCopy2">Copy</button></div>
+      <h3>Talents</h3>
+      <div id="talentList" class="talent-list"></div>
+      <h3>Shortcuts</h3>
+      <dl class="keys"><dt>Enter</dt><dd>send</dd><dt>Esc</dt><dd>stop</dd><dt>1–5</dt><dd>moods</dd><dt>N</dt><dd>nod</dd><dt>M V C T S</dt><dd>panels</dd></dl>
+      <h3>Health</h3>
+      <pre class="json" id="healthJson">…</pre>
+    </section>
+  </aside>
+</div>
+<script src="console.js"></script>
+</body></html>

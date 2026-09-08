@@ -27,9 +27,46 @@ export type StageCue =
   | { type: 'caption'; text: string }
   /** Cut the current clip and drop everything queued. */
   | { type: 'stop' }
+  /** Pin a Cubism parameter (console sliders); `value: null` releases it. */
+  | { type: 'param'; id: string; value: number | null }
 
-/** Messages the page sends back. */
-export type StageReport = { type: 'spoke'; id: string } | { type: 'ready' }
+/** Messages the page sends back. A console announces itself with role: 'console'. */
+export type StageReport =
+  | { type: 'playing'; id: string }
+  | { type: 'spoke'; id: string }
+  | { type: 'ready'; role?: 'console' }
+
+/**
+ * What the console sees that the render page does not: the turn as it happens, clips with
+ * their timings, chat arriving. Cues are mirrored to consoles too, so the panels stay in sync.
+ */
+export type ConsoleEvent =
+  | {
+      type: 'turn'
+      phase: 'start' | 'done' | 'error'
+      message?: string
+      reply?: string
+      ms?: number
+    }
+  | { type: 'reasoning'; v: string }
+  | { type: 'token'; v: string }
+  | { type: 'tool'; v: string[] }
+  | { type: 'tool_done'; v: string }
+  | { type: 'clip'; id: string; text: string; seconds: number; genMs: number }
+  /** A page started / finished playing a clip. With several pages, the first report wins. */
+  | { type: 'playing'; id: string }
+  | { type: 'spoke'; id: string }
+  | { type: 'chat'; author: string; text: string; mentioned: boolean; at: number }
+  | {
+      type: 'talent'
+      name: string
+      model: string
+      voice: string
+      rvc?: string
+      speed: number
+      pitch: number
+    }
+  | { type: 'log'; text: string }
 
 /** One viewer message from Twitch chat, filtered and ready for the batcher. */
 export interface ChatLine {
