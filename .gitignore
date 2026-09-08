@@ -5,6 +5,8 @@ dist/
 !.env.example
 # Per-machine config. stage.example.toml is the tracked template.
 stage.toml
+# Console-written per-talent overrides (voice, model, layout)
+stage.d/
 # Python voice service
 services/voice/venv/
 services/voice/models/

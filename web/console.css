@@ -93,7 +93,7 @@ code { font-family: var(--mono); font-size: 12px }
 
 /* panel */
 .panel { background: var(--bg1); border-left: 1px solid var(--line); overflow: auto; position: relative }
-.pane { display: none; padding: 18px 18px 28px; animation: fade .18s ease } .app[data-panel="model"] .pane[data-pane="model"], .app[data-panel="voice"] .pane[data-pane="voice"], .app[data-panel="chat"] .pane[data-pane="chat"], .app[data-panel="twitch"] .pane[data-pane="twitch"], .app[data-panel="settings"] .pane[data-pane="settings"] { display: block }
+.pane { display: none; padding: 18px 18px 28px; animation: fade .18s ease } .pane.active { display: block }
 @keyframes fade { from { opacity: 0; transform: translateY(4px) } }
 .pane h2 { margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: .01em; display: flex; align-items: baseline; gap: 10px }
 .pane h3 { margin: 22px 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); display: flex; align-items: baseline; gap: 8px }
@@ -174,3 +174,28 @@ code { font-family: var(--mono); font-size: 12px }
 
 @media (max-width: 1100px) { :root { --panel-w: 300px } .readouts { display: none } }
 @media (max-width: 860px) { .app { grid-template-columns: var(--rail) 1fr } .panel { display: none } }
+
+/* additions: hud extras, logs drawer, scene/brain/mic panels, readiness */
+.hud-sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px }
+.icon-btn.danger.on { color: #fff; background: var(--err); border-color: var(--err); box-shadow: 0 0 14px rgba(255, 95, 135, .5) }
+.edit-hint { position: absolute; right: 12px; top: 10px; font-size: 11px; color: var(--dim); background: rgba(10, 7, 17, .6); padding: 4px 8px; border-radius: 6px; pointer-events: none; opacity: 0; transition: .2s }
+.stage-frame:hover .edit-hint { opacity: 1 }
+.logs[hidden] { display: none } .logs { position: relative; z-index: 2; margin: 0 18px 8px; border-radius: 12px; border: 1px solid var(--line); background: rgba(10, 7, 17, .85); max-height: 180px; display: flex; flex-direction: column }
+.logs-head { display: flex; align-items: center; padding: 6px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); border-bottom: 1px solid var(--line) }
+.logs pre { margin: 0; padding: 8px 12px; overflow: auto; font: 11px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap }
+.viewport.with-logs { grid-template-rows: var(--hud) 1fr auto var(--transport) }
+.field.row { flex-direction: row; align-items: center; gap: 10px }
+.field.row input { accent-color: var(--accent) }
+.copyrow input[type=color] { width: 44px; height: 38px; padding: 2px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2) }
+.stats .v.small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ctxbar { height: 8px; margin: 10px 0 0; border-radius: 4px; background: rgba(255, 255, 255, .06); overflow: hidden } .ctxbar div { height: 100%; width: 0; background: var(--grad); transition: width .3s }
+.badges { display: flex; flex-wrap: wrap; gap: 6px }
+.badge-tool { font: 11px var(--mono); padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted) }
+.badge-tool.on { color: var(--ok); border-color: rgba(135, 215, 135, .35) }
+.badge-tool.risky { color: var(--err); border-color: rgba(255, 95, 135, .45); background: rgba(255, 95, 135, .08) }
+.meter.wide { width: 100%; margin-top: 12px }
+.ready { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px }
+.ready li { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; padding: 8px 12px; border-radius: var(--r-sm); background: var(--bg2); border: 1px solid var(--line); font-size: 12.5px }
+.ready li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--err); box-shadow: 0 0 8px rgba(255, 95, 135, .5) }
+.ready li.ok::before { background: var(--ok); box-shadow: 0 0 8px rgba(135, 215, 135, .5) }
+.ready li .d { color: var(--dim); font-family: var(--mono); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }

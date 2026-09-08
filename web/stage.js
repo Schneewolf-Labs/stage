@@ -3,7 +3,9 @@
  * Query params:  ?bg=1 paints the brand background (default is transparent for OBS);
  *                ?status=0 hides the debug status line;
  *                ?mute=1 keeps lipsync but plays no sound (the console's preview);
- *                ?caption=0 hides the on-page caption (the console draws its own).
+ *                ?caption=0 hides the on-page caption (the console draws its own);
+ *                ?edit=1 lets the mouse move (drag) and scale (wheel) the model; the result is
+ *                        POSTed to /transform so every page, OBS included, follows.
  *
  * Three things about pixi-live2d-display 0.5 that are easy to get wrong:
  *  1. The bundle needs the Cubism 2 runtime (live2d.min.js) loaded even for Cubism 4 models.
@@ -11,10 +13,14 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
+import { clampTransform, fitModel } from './core.js'
+
 const q = new URLSearchParams(location.search)
+const editable = q.get('edit') === '1'
 if (q.get('bg') === '1') document.body.classList.add('opaque')
 if (q.get('status') === '0') document.getElementById('status').classList.add('hidden')
-const showCaptions = q.get('caption') !== '0'
+const captionParam = q.get('caption') !== '0'
+const showCaptions = () => captionParam && scene.captions.show
 const statusEl = document.getElementById('status')
 const captionEl = document.getElementById('caption')
 const status = (s) => { statusEl.textContent = s }
@@ -32,6 +38,9 @@ const MOODS = {
 const lerp = (a, b, k) => a + (b - a) * k
 
 let model = null, pidx = {}
+let transform = { x: 0, y: 0, scale: 1 }
+let scene = { motion: { sway: 1, speed: 1, blink: 3.7 }, captions: { show: true, size: 22 }, background: { color: '' } }
+let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
@@ -47,10 +56,14 @@ async function load(url) {
   if (model) { app.stage.removeChild(model); model.destroy(); model = null }
   const m = await PIXI.live2d.Live2DModel.from(url, { autoInteract: false })
   app.stage.addChild(m)
+  // Natural size before any scale, so fitModel's math is stable across re-fits.
+  m.scale.set(1)
+  const natural = { w: m.width, h: m.height }
   const fit = () => {
-    const s = Math.min(app.screen.width / m.width, app.screen.height / m.height) * 0.95
-    m.scale.set(s); m.anchor.set(0.5, 0.5); m.position.set(app.screen.width / 2, app.screen.height / 2)
+    const f = fitModel({ w: app.screen.width, h: app.screen.height }, natural, transform)
+    m.scale.set(f.scale); m.anchor.set(0.5, 0.5); m.position.set(f.x, f.y)
   }
+  fitNow = fit
   fit(); window.addEventListener('resize', fit)
   pidx = {}; m.internalModel.coreModel.getModel().parameters.ids.forEach((id, i) => { pidx[id] = i })
 
@@ -58,13 +71,15 @@ async function load(url) {
   m.internalModel.on('beforeModelUpdate', () => {
     const now = performance.now(), dt = (now - last) / 1000; last = now; t += dt
     // Idle wander through the focus controller; Cubism physics turns it into hair/body sway.
-    let fx = Math.sin(t * 0.55) * 0.35 + Math.sin(t * 1.3) * 0.1
-    let fy = Math.sin(t * 0.4 + 1) * 0.15
+    const { sway, speed } = scene.motion
+    const ts = t * speed
+    let fx = (Math.sin(ts * 0.55) * 0.35 + Math.sin(ts * 1.3) * 0.1) * sway
+    let fy = Math.sin(ts * 0.4 + 1) * 0.15 * sway
     if (state === 'thinking') { fx += 0.35; fy += 0.3 }          // glance up and away
     if (state === 'working') { fy -= 0.25; fx += Math.sin(t * 6) * 0.05 } // head down, busy
     if (nodT >= 0) { fy += Math.sin(nodT * Math.PI * 2) * -0.5; nodT += dt * 2.2; if (nodT > 1) nodT = -1 }
     m.internalModel.focusController.focus(fx, fy, false)
-    const blink = (t % 3.7) < 0.12 ? 0 : 1
+    const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
     const target = expressions[mood] ? MOODS.neutral : (MOODS[mood] || MOODS.neutral)
     for (const k in cur) cur[k] = lerp(cur[k], target[k], 0.08)
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
@@ -114,7 +129,7 @@ async function pump() {
     src.connect(analyser)
     if (muted) { const g = ac.createGain(); g.gain.value = 0; analyser.connect(g); g.connect(ac.destination) }
     else analyser.connect(ac.destination)
-    if (showCaptions) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
+    if (showCaptions()) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
     send({ type: 'playing', id: cue.id })
     await new Promise((res) => { src.onended = res; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
@@ -141,8 +156,12 @@ function apply(cue) {
   switch (cue.type) {
     case 'load':
       loadExpressions(cue.expressions || [])
+      if (cue.transform) transform = clampTransform(cue.transform)
+      if (cue.scene) applyScene(cue.scene)
       load(cue.model).catch((e) => status(`load failed: ${e.message}`))
       break
+    case 'transform': transform = clampTransform(cue); fitNow(); break
+    case 'scene': applyScene(cue.scene); break
     case 'speak': queue.push(cue); pump(); break
     case 'mood': mood = cue.mood; break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
@@ -151,6 +170,32 @@ function apply(cue) {
     case 'stop': queue.length = 0; if (current) { try { current.stop() } catch {} } break
     case 'param': if (cue.value === null) delete pinned[cue.id]; else pinned[cue.id] = cue.value; break
   }
+}
+
+function applyScene(sc) {
+  scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background } }
+  captionEl.style.fontSize = `${scene.captions.size}px`
+  if (!showCaptions()) captionEl.style.display = 'none'
+  document.body.style.background = scene.background.color || ''
+  document.body.classList.toggle('opaque', !!scene.background.color || q.get('bg') === '1')
+  if (scene.background.color) document.body.style.background = scene.background.color
+}
+
+/* ---- edit mode: drag to move, wheel to scale; the server rebroadcasts to every page ---- */
+if (editable) {
+  let drag = null
+  const push = (() => { let h; return () => { clearTimeout(h); h = setTimeout(() => fetch('/transform', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(transform) }), 120) } })()
+  const view = app.view
+  view.style.cursor = 'grab'
+  view.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y }; view.setPointerCapture(e.pointerId); view.style.cursor = 'grabbing' })
+  view.addEventListener('pointermove', (e) => {
+    if (!drag) return
+    transform = clampTransform({ ...transform, x: drag.tx + ((e.clientX - drag.x) / app.screen.width) * 2, y: drag.ty + ((e.clientY - drag.y) / app.screen.height) * 2 })
+    fitNow()
+  })
+  const end = () => { if (drag) { drag = null; view.style.cursor = 'grab'; push() } }
+  view.addEventListener('pointerup', end); view.addEventListener('pointercancel', end)
+  view.addEventListener('wheel', (e) => { e.preventDefault(); transform = clampTransform({ ...transform, scale: transform.scale * (e.deltaY < 0 ? 1.06 : 1 / 1.06) }); fitNow(); push() }, { passive: false })
 }
 
 /* ---- websocket with reconnect ---- */
@@ -167,4 +212,4 @@ connect()
 // Autoplay policy: audio needs one user gesture in a normal browser tab. OBS's browser source
 // does not enforce it. Any click on the page unlocks the AudioContext.
 document.addEventListener('click', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume() })
-window.stage = { apply, get model() { return model }, get level() { return mouth } }
+window.stage = { apply, get model() { return model }, get level() { return mouth }, get transform() { return transform } }

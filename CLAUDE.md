@@ -73,6 +73,14 @@ never from the `speak` cue, which only means "queued".
   `torch.load` to allow it. Do not "fix" this by downgrading torch.
 - One inference lock. A sentence is sub-second; batching would add complexity for nothing.
 
+## Tests Come First
+
+Server behaviour is specified in `test/server.test.ts` (real server, fake voice + egirl on
+port 0, WebSocket clients with roles) and UI logic in `test/core.test.ts` over `web/core.js`.
+A new endpoint, cue or event gets its test written first, run red, then implemented. DOM code
+in `console.js`/`stage.js` stays thin; anything with a decision in it goes in `core.js` where
+it can be tested.
+
 ## Code Style
 
 Same as egirl: `interface` for shapes, no `any`, explicit return types on exports, named exports

@@ -20,6 +20,7 @@ export async function synthesize(
       voice: talent.voice,
       rvc: talent.rvc ?? null,
       speed: talent.speed,
+      pitch: talent.pitch,
     }),
   })
   if (!res.ok) throw new Error(`voice service HTTP ${res.status}: ${await res.text()}`)

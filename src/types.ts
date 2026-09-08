@@ -1,3 +1,5 @@
+import type { Scene, Transform } from './persist'
+
 /** Events egirl's `POST /chat` (stream: true) emits as SSE `data:` frames. */
 export type EgirlEvent =
   | { t: 'queued'; position: number }
@@ -19,7 +21,18 @@ export type Mood = 'neutral' | 'happy' | 'sad' | 'angry' | 'surprised'
  * order on the page, so the server can send them as fast as it synthesizes.
  */
 export type StageCue =
-  | { type: 'load'; model: string; talent: string; expressions: { name: string; url: string }[] }
+  | {
+      type: 'load'
+      model: string
+      talent: string
+      expressions: { name: string; url: string }[]
+      transform: Transform
+      scene: Scene
+    }
+  /** Placement on the canvas: fractions of the screen for x/y, scale multiplier. */
+  | { type: 'transform'; x: number; y: number; scale: number }
+  /** Idle motion, captions and background settings. */
+  | { type: 'scene'; scene: Scene }
   | { type: 'speak'; id: string; url: string; text: string }
   | { type: 'mood'; mood: Mood }
   | { type: 'state'; state: StageState; detail?: string }
@@ -65,8 +78,12 @@ export type ConsoleEvent =
       rvc?: string
       speed: number
       pitch: number
+      muted: boolean
+      transform: Transform
+      scene: Scene
     }
   | { type: 'log'; text: string }
+  | { type: 'logs'; lines: string[] }
 
 /** One viewer message from Twitch chat, filtered and ready for the batcher. */
 export interface ChatLine {

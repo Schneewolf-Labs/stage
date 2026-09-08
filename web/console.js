@@ -1,7 +1,9 @@
-/* Stage console: the operator's view of one talent. Talks to the server over the same
- * WebSocket the render page uses (announcing itself as a console so it also gets turn events),
- * and reads parameter ranges and live values straight out of the preview iframe, which is the
- * real render page with sound muted. */
+/* Stage console: the operator's view of one talent. Same WebSocket as the render page,
+ * announced as a console so it also receives turn events. State logic lives in core.js
+ * (tested); this file is wiring and DOM. Parameter ranges and live values are read straight
+ * out of the preview iframe, which is the real render page with sound muted. */
+import { clampTransform, clipStats, readiness, riskyTools, turnReducer } from './core.js'
+
 const $ = (id) => document.getElementById(id)
 const app = document.querySelector('.app')
 const preview = $('preview')
@@ -12,13 +14,13 @@ const VOICES = {
   'British male': ['bm_george', 'bm_lewis', 'bm_daniel', 'bm_fable'],
 }
 const MOOD_KEYS = { 1: 'neutral', 2: 'happy', 3: 'sad', 4: 'angry', 5: 'surprised' }
+const PANEL_KEYS = { m: 'model', e: 'scene', v: 'voice', b: 'brain', c: 'chat', t: 'twitch', i: 'mic', s: 'settings' }
 
 /* ---------- state ---------- */
 const S = {
-  talent: null, model: null, expressions: [], modelList: [],
-  state: 'idle', mood: 'neutral', speaking: false,
-  clips: [], turnStart: 0, ttfa: null, currentTurn: null, currentClipId: null,
-  pinned: {}, params: [],
+  talent: null, model: null, expressions: [], modelList: [], health: null, brain: null,
+  state: 'idle', mood: 'neutral', turns: turnReducer(undefined, { type: 'init' }),
+  clips: [], turnStart: 0, ttfa: null, pinned: {}, params: [], monitor: false,
 }
 
 /* ---------- helpers ---------- */
@@ -30,38 +32,50 @@ let toastT
 function toast(text) { const el = $('toast'); el.textContent = text; el.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('on'), 1800) }
 function copy(text) { navigator.clipboard?.writeText(text).then(() => toast('Copied'), () => toast(text)) }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+const bindRange = (id, valId, fmt, onChange) => { const r = $(id); r.addEventListener('input', () => { $(valId).textContent = fmt(Number(r.value)); onChange(Number(r.value)) }) }
+const setRange = (id, valId, v, fmt) => { $(id).value = v; $(valId).textContent = fmt(v) }
 
 /* ---------- panels ---------- */
-function showPanel(name) { app.dataset.panel = name; document.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.panel === name)) }
+function showPanel(name) { app.dataset.panel = name; document.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.panel === name)); document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === name)); if (name === 'brain') loadBrain(); if (name === 'settings') renderReady() }
 document.querySelectorAll('.rail-btn').forEach((b) => b.addEventListener('click', () => showPanel(b.dataset.panel)))
 showPanel('model')
 
 /* ---------- HUD ---------- */
 function setState(state, detail) {
   S.state = state
-  const pill = $('statePill'); const shown = S.speaking && state === 'idle' ? 'speaking' : state
+  const pill = $('statePill'); const shown = S.turns.speaking && state === 'idle' ? 'speaking' : state
   pill.dataset.state = shown
   $('stateText').textContent = detail && shown !== 'speaking' ? `${shown} · ${detail}` : shown
 }
 function setMood(m) { S.mood = m; document.querySelectorAll('.chip[data-mood]').forEach((c) => c.classList.toggle('active', c.dataset.mood === m)) }
 function setTalent(t) {
   S.talent = t
-  $('talentName').textContent = t.name
-  $('talentAvatar').textContent = t.name.slice(0, 1)
-  $('talentModel').textContent = t.model
+  $('talentName').textContent = t.name; $('talentAvatar').textContent = t.name.slice(0, 1); $('talentModel').textContent = t.model
   document.title = `Stage · ${t.name}`
   $('voiceSel').value = t.voice; $('rvcSel').value = t.rvc || ''
-  $('pitch').value = t.pitch; $('pitchVal').textContent = t.pitch
-  $('speed').value = t.speed; $('speedVal').textContent = Number(t.speed).toFixed(2)
+  setRange('pitch', 'pitchVal', t.pitch, (v) => v); setRange('speed', 'speedVal', t.speed, (v) => v.toFixed(2))
+  $('btnMute').classList.toggle('on', !!t.muted); $('btnMute').title = t.muted ? 'Unmute the talent' : 'Mute the talent (kill switch)'
+  if (t.muted) toast('Talent is muted')
+  applyTransformUI(t.transform); applySceneUI(t.scene)
+  $('brSession').textContent = `session ${t.name}`
   renderModels()
 }
 $('btnBg').addEventListener('click', () => { $('stageFrame').classList.toggle('checker'); $('btnBg').classList.toggle('on') })
 const obsUrl = `${location.origin}/`
 $('obsUrl').textContent = obsUrl
-$('btnCopy').addEventListener('click', () => copy(obsUrl))
-$('btnCopy2').addEventListener('click', () => copy(obsUrl))
+$('btnCopy').addEventListener('click', () => copy(obsUrl)); $('btnCopy2').addEventListener('click', () => copy(obsUrl))
+$('btnMute').addEventListener('click', () => post('/mute', { on: !S.talent?.muted }))
+$('btnMonitor').addEventListener('click', () => {
+  S.monitor = !S.monitor; $('btnMonitor').classList.toggle('on', S.monitor)
+  preview.src = `/?${S.monitor ? 'mute=0' : 'mute=1'}&status=0&caption=0&edit=1`
+  toast(S.monitor ? 'Monitoring preview audio (click the preview once if silent)' : 'Preview muted')
+})
+$('btnLogs').addEventListener('click', toggleLogs)
+function toggleLogs() { const on = $('logs').hidden; $('logs').hidden = !on; $('btnLogs').classList.toggle('on', on); document.querySelector('.viewport').classList.toggle('with-logs', on) }
+function addLog(line) { const pre = $('logLines'); pre.textContent += `${line}\n`; const lines = pre.textContent.split('\n'); if (lines.length > 400) pre.textContent = lines.slice(-400).join('\n'); pre.scrollTop = pre.scrollHeight }
+$('btnClearLogs').addEventListener('click', () => { $('logLines').textContent = '' })
 
-/* level meter + live parameter bars, read from the preview each frame */
+/* level meter + live parameter bars + transform sliders, from the preview each frame */
 function tick() {
   const st = preview.contentWindow?.stage
   const m = st?.model
@@ -74,6 +88,7 @@ function tick() {
       if (!(p.id in S.pinned)) { p.val.textContent = v.toFixed(2); p.slider.value = v }
     }
   }
+  if (st?.transform && !draggingTransform) applyTransformUI(st.transform)
   requestAnimationFrame(tick)
 }
 requestAnimationFrame(tick)
@@ -91,7 +106,7 @@ async function send() {
   $('btnSend').classList.remove('busy'); $('btnSend').disabled = false
 }
 $('btnSend').addEventListener('click', send)
-$('btnSay').addEventListener('click', async () => { const text = composer.value.trim(); if (!text) return; composer.value = ''; await post('/say', { text }) })
+$('btnSay').addEventListener('click', async () => { const text = composer.value.trim(); if (!text) return; composer.value = ''; const r = await post('/say', { text }); if (r.muted) toast('Muted: nothing was said') })
 $('btnStop').addEventListener('click', () => post('/interrupt').then(() => toast('Stopped')))
 document.querySelectorAll('.chip[data-mood]').forEach((c) => c.addEventListener('click', () => post('/cue', { type: 'mood', mood: c.dataset.mood })))
 document.querySelectorAll('.chip[data-gesture]').forEach((c) => c.addEventListener('click', () => post('/cue', { type: 'gesture', name: c.dataset.gesture })))
@@ -101,8 +116,8 @@ document.addEventListener('keydown', (e) => {
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return
   if (MOOD_KEYS[e.key]) post('/cue', { type: 'mood', mood: MOOD_KEYS[e.key] })
   else if (e.key === 'n') post('/cue', { type: 'gesture', name: 'nod' })
-  else if (e.key === 'm') showPanel('model'); else if (e.key === 'v') showPanel('voice'); else if (e.key === 'c') showPanel('chat')
-  else if (e.key === 't') showPanel('twitch'); else if (e.key === 's') showPanel('settings')
+  else if (e.key === 'l') toggleLogs()
+  else if (PANEL_KEYS[e.key]) showPanel(PANEL_KEYS[e.key])
   else if (e.key === '/') { e.preventDefault(); composer.focus() }
 })
 
@@ -128,8 +143,7 @@ function renderExpressions() {
   for (const e of S.expressions) {
     const mood = Object.values(MOOD_KEYS).find((m) => e.name.toLowerCase().includes(m))
     const b = el('button', 'chip', e.name); b.title = mood ? `bound to [${mood}]` : 'no mood tag matches this name'
-    if (mood) b.addEventListener('click', () => post('/cue', { type: 'mood', mood }))
-    else b.disabled = true
+    if (mood) b.addEventListener('click', () => post('/cue', { type: 'mood', mood })); else b.disabled = true
     list.appendChild(b)
   }
 }
@@ -138,7 +152,7 @@ async function loadParams() {
   const m = st?.model
   if (!m || !S.model) return setTimeout(loadParams, 300)
   const core = m.internalModel.coreModel.getModel().parameters
-  let names = {}, groups = {}, order = []
+  const names = {}, groups = {}, order = []
   try {
     const m3 = await fetch(S.model).then((r) => r.json())
     if (m3.FileReferences?.DisplayInfo) {
@@ -160,8 +174,7 @@ async function loadParams() {
     const slider = el('input'); slider.type = 'range'; slider.min = core.minimumValues[i]; slider.max = core.maximumValues[i]; slider.step = (core.maximumValues[i] - core.minimumValues[i]) / 200 || 0.01
     const val = el('div', 'val', '0.00')
     track.append(live, slider); row.append(name, track, val); box.appendChild(row)
-    const p = { id, index: i, min: core.minimumValues[i], max: core.maximumValues[i], live, slider, val, row }
-    S.params.push(p)
+    S.params.push({ id, index: i, min: core.minimumValues[i], max: core.maximumValues[i], live, slider, val, row })
     const pin = debounce((v) => post('/cue', { type: 'param', id, value: v }), 30)
     slider.addEventListener('input', () => { const v = Number(slider.value); S.pinned[id] = v; row.classList.add('pinned'); val.textContent = v.toFixed(2); pin(v) })
     slider.addEventListener('dblclick', () => release(id))
@@ -170,97 +183,122 @@ async function loadParams() {
 function release(id) { delete S.pinned[id]; document.querySelector(`.param[data-id="${CSS.escape(id)}"]`)?.classList.remove('pinned'); post('/cue', { type: 'param', id, value: null }) }
 $('btnRelease').addEventListener('click', () => Object.keys(S.pinned).forEach(release))
 
-/* ---------- voice panel ---------- */
-{
-  const sel = $('voiceSel')
-  for (const [group, list] of Object.entries(VOICES)) { const og = el('optgroup'); og.label = group; for (const v of list) og.appendChild(new Option(v, v)); sel.appendChild(og) }
+/* ---------- scene panel ---------- */
+let draggingTransform = false
+function applyTransformUI(t) { const c = clampTransform(t); setRange('tx', 'txVal', c.x, (v) => v.toFixed(2)); setRange('ty', 'tyVal', c.y, (v) => v.toFixed(2)); setRange('ts', 'tsVal', c.scale, (v) => `${v.toFixed(2)}`) }
+const pushTransform = debounce(() => post('/transform', { x: Number($('tx').value), y: Number($('ty').value), scale: Number($('ts').value) }).then(() => { draggingTransform = false }), 80)
+for (const id of ['tx', 'ty', 'ts']) { $(id).addEventListener('pointerdown', () => { draggingTransform = true }) }
+bindRange('tx', 'txVal', (v) => v.toFixed(2), pushTransform); bindRange('ty', 'tyVal', (v) => v.toFixed(2), pushTransform); bindRange('ts', 'tsVal', (v) => v.toFixed(2), pushTransform)
+$('btnResetTransform').addEventListener('click', () => post('/transform', { x: 0, y: 0, scale: 1 }))
+function applySceneUI(sc) {
+  if (!sc) return
+  setRange('sway', 'swayVal', sc.motion.sway, (v) => v.toFixed(2)); setRange('mspeed', 'mspeedVal', sc.motion.speed, (v) => v.toFixed(2)); setRange('blink', 'blinkVal', sc.motion.blink, (v) => v.toFixed(1))
+  $('capShow').checked = sc.captions.show; setRange('capSize', 'capSizeVal', sc.captions.size, (v) => v)
+  if (sc.background.color) $('bgColor').value = sc.background.color
 }
-const pushVoice = debounce(() => post('/voice', { voice: $('voiceSel').value, rvc: $('rvcSel').value || null, pitch: Number($('pitch').value), speed: Number($('speed').value) }), 250)
+const pushMotion = debounce(() => post('/scene', { motion: { sway: Number($('sway').value), speed: Number($('mspeed').value), blink: Number($('blink').value) } }), 120)
+bindRange('sway', 'swayVal', (v) => v.toFixed(2), pushMotion); bindRange('mspeed', 'mspeedVal', (v) => v.toFixed(2), pushMotion); bindRange('blink', 'blinkVal', (v) => v.toFixed(1), pushMotion)
+const pushCaptions = debounce(() => post('/scene', { captions: { show: $('capShow').checked, size: Number($('capSize').value) } }), 120)
+$('capShow').addEventListener('change', pushCaptions); bindRange('capSize', 'capSizeVal', (v) => v, pushCaptions)
+$('btnBgApply').addEventListener('click', () => post('/scene', { background: { color: $('bgColor').value } }))
+$('btnBgClear').addEventListener('click', () => post('/scene', { background: { color: '' } }))
+
+/* ---------- voice panel ---------- */
+{ const sel = $('voiceSel'); for (const [group, list] of Object.entries(VOICES)) { const og = el('optgroup'); og.label = group; for (const v of list) og.appendChild(new Option(v, v)); sel.appendChild(og) } }
+const pushVoice = debounce(() => post('/voice', { voice: $('voiceSel').value, rvc: $('rvcSel').value || null, pitch: Number($('pitch').value), speed: Number($('speed').value) }).then(() => toast('Voice saved')), 250)
 $('voiceSel').addEventListener('change', pushVoice); $('rvcSel').addEventListener('change', pushVoice)
-$('pitch').addEventListener('input', () => { $('pitchVal').textContent = $('pitch').value; pushVoice() })
-$('speed').addEventListener('input', () => { $('speedVal').textContent = Number($('speed').value).toFixed(2); pushVoice() })
+bindRange('pitch', 'pitchVal', (v) => v, pushVoice); bindRange('speed', 'speedVal', (v) => v.toFixed(2), pushVoice)
 $('btnTest').addEventListener('click', () => post('/say', { text: $('testLine').value }))
 function addClipStat(c) {
   S.clips.push(c); if (S.clips.length > 40) S.clips.shift()
-  $('stClips').textContent = S.clips.length
-  $('stSynth').textContent = ms(c.genMs); $('stAudio').textContent = secs(c.seconds)
-  const rtfs = S.clips.map((x) => x.genMs / 1000 / (x.seconds || 1))
-  $('stRtf').textContent = (rtfs.reduce((a, b) => a + b, 0) / rtfs.length).toFixed(3)
+  const st = clipStats(S.clips)
+  $('stClips').textContent = st.count; $('stSynth').textContent = ms(st.lastGenMs); $('stAudio').textContent = secs(st.lastSeconds); $('stRtf').textContent = st.avgRtf.toFixed(3)
   $('roSynth').textContent = ms(c.genMs); $('roRtf').textContent = (c.genMs / 1000 / (c.seconds || 1)).toFixed(2)
   const sp = $('spark'); sp.innerHTML = ''
   const max = Math.max(...S.clips.map((x) => x.genMs), 1)
   for (const x of S.clips.slice(-30)) { const bar = el('i'); bar.style.height = `${Math.max(6, (x.genMs / max) * 100)}%`; bar.title = `${ms(x.genMs)} for ${secs(x.seconds)}`; sp.appendChild(bar) }
 }
 
-/* ---------- chat panel ---------- */
-function startTurn(message) {
-  $('timeline').querySelector('.empty')?.remove()
-  const t = el('div', 'turn')
-  const you = el('div', 'you'); you.append('you  ', el('b', null, message)); t.appendChild(you)
-  const think = el('details', 'think live'); const sum = el('summary', null, 'thinking'); const pre = el('pre'); think.append(sum, pre); think.hidden = true; t.appendChild(think)
-  const tools = el('div', 'tools'); tools.hidden = true; t.appendChild(tools)
-  const reply = el('div', 'reply'); const cursor = el('span', 'cursor'); reply.appendChild(cursor); t.appendChild(reply)
-  const foot = el('div', 'foot'); t.appendChild(foot)
-  $('timeline').prepend(t)
-  S.currentTurn = { el: t, think, pre, tools, reply, cursor, foot, reasoning: '', text: '', t0: performance.now(), firstToken: null }
-  S.turnStart = performance.now(); S.ttfa = null; $('roTtfa').textContent = '…'
+/* ---------- brain panel ---------- */
+async function loadBrain() {
+  const b = await fetch('/egirl').then((r) => r.json()).catch((e) => ({ ok: false, error: String(e) }))
+  S.brain = b
+  $('brUp').textContent = b.ok ? 'yes' : 'no'; $('brUp').style.color = b.ok ? 'var(--ok)' : 'var(--err)'
+  $('brName').textContent = b.info?.name ?? '—'; $('brModel').textContent = b.info?.model ?? '—'; $('brModel').title = b.info?.model ?? ''
+  if (b.info?.thinking) $('thinkSel').value = b.info.thinking
+  const ctx = b.context || {}
+  const used = ctx.used ?? ctx.tokens ?? ctx.total ?? null, limit = ctx.limit ?? ctx.contextLength ?? ctx.max ?? b.info?.contextLength ?? null
+  $('brCtx').textContent = used != null && limit ? `${Math.round((used / limit) * 100)}%` : used != null ? String(used) : '—'
+  $('ctxFill').style.width = used != null && limit ? `${Math.min(100, (used / limit) * 100)}%` : '0'
+  const badges = $('toolBadges'); badges.innerHTML = ''
+  const risky = new Set(riskyTools(b.info?.tools))
+  for (const [k, v] of Object.entries(b.info?.tools || {})) { const on = v === true || (typeof v === 'string' && v !== 'off'); badges.appendChild(el('span', `badge-tool${on ? (risky.has(k) ? ' risky' : ' on') : ''}`, `${k}${on ? '' : ' off'}`)) }
+  if (!b.info?.tools) badges.appendChild(el('div', 'empty', b.ok ? 'No tool information in /info.' : `Unreachable: ${b.error}`))
+  $('brainJson').textContent = JSON.stringify(b, null, 1)
+  renderReady()
 }
-function onTurnEvent(ev) {
-  const T = S.currentTurn
-  if (ev.type === 'turn' && ev.phase === 'start') return startTurn(ev.message)
-  if (!T) return
-  if (ev.type === 'reasoning') { T.reasoning += ev.v; T.think.hidden = false; T.pre.textContent = T.reasoning; T.think.querySelector('summary').textContent = `thinking · ${T.reasoning.length} chars · ${ms(performance.now() - T.t0)}`; T.pre.scrollTop = T.pre.scrollHeight }
-  else if (ev.type === 'tool') { T.tools.hidden = false; for (const n of ev.v) { const c = el('span', 'tool', n); c.dataset.tool = n; T.tools.appendChild(c) } }
-  else if (ev.type === 'tool_done') { const c = [...T.tools.children].reverse().find((x) => x.dataset.tool === ev.v && !x.classList.contains('done')); c?.classList.add('done') }
-  else if (ev.type === 'token') { if (T.firstToken == null) { T.firstToken = performance.now() - T.t0; T.think.classList.remove('live') } T.text += ev.v }
-  else if (ev.type === 'clip') {
-    if (S.ttfa == null) { S.ttfa = performance.now() - S.turnStart; $('roTtfa').textContent = ms(S.ttfa) }
-    const s = el('span', 's queued', `${ev.text} `); sentences.set(ev.id, s); T.reply.insertBefore(s, T.cursor)
-    if (sentences.size > 400) sentences.delete(sentences.keys().next().value)
+$('btnBrainRefresh').addEventListener('click', loadBrain)
+$('thinkSel').addEventListener('change', () => post('/egirl/thinking', { level: $('thinkSel').value }).then((r) => toast(r.error ? r.error : `Thinking: ${$('thinkSel').value}`)))
+$('btnAbortTurn').addEventListener('click', () => post('/interrupt').then((r) => toast(r.aborted ? 'Turn aborted' : 'Nothing to abort')))
+
+/* ---------- mic panel (stub with real device list) ---------- */
+navigator.mediaDevices?.enumerateDevices?.().then((ds) => { const sel = $('micSel'); sel.innerHTML = ''; const ins = ds.filter((d) => d.kind === 'audioinput'); for (const d of ins) sel.appendChild(new Option(d.label || `microphone ${sel.length + 1}`, d.deviceId)); if (!ins.length) sel.appendChild(new Option('no input devices (grant mic permission)', '')) }).catch(() => {})
+
+/* ---------- chat panel (rendered from the reducer) ---------- */
+function renderTurns() {
+  const tl = $('timeline'); tl.innerHTML = ''
+  if (!S.turns.turns.length) { tl.appendChild(el('div', 'empty', 'No turns yet. Send a message below.')); return }
+  for (const t of S.turns.turns) {
+    const box = el('div', `turn${t.error ? ' error' : ''}`)
+    const you = el('div', 'you'); you.append('you  ', el('b', null, t.message)); box.appendChild(you)
+    if (t.reasoning) { const d = el('details', `think${t.done ? '' : ' live'}`); d.append(el('summary', null, `thinking · ${t.reasoning.length} chars`), el('pre', null, t.reasoning)); box.appendChild(d) }
+    if (t.tools.length) { const tools = el('div', 'tools'); for (const c of t.tools) tools.appendChild(el('span', `tool${c.done ? ' done' : ''}`, c.name)); box.appendChild(tools) }
+    const reply = el('div', 'reply')
+    if (t.error) reply.textContent = t.error
+    else { for (const s of t.sentences) reply.appendChild(el('span', `s ${s.status}`, `${s.text} `)); if (!t.done) reply.appendChild(el('span', 'cursor')) }
+    box.appendChild(reply)
+    if (t.done) { const foot = el('div', 'foot'); foot.innerHTML = [`total <b>${ms(t.ms)}</b>`, t.firstAudio != null ? `first audio <b>${ms(t.firstAudio)}</b>` : '', t.reasoning ? `reasoning <b>${t.reasoning.length}</b> chars` : ''].filter(Boolean).join('<span style="opacity:.4"> · </span>'); box.appendChild(foot) }
+    tl.appendChild(box)
   }
-  else if (ev.type === 'turn' && (ev.phase === 'done' || ev.phase === 'error')) {
-    T.cursor.remove(); T.think.classList.remove('live')
-    if (ev.phase === 'error') { T.el.classList.add('error'); T.reply.textContent = ev.message }
-    const parts = [`total <b>${ms(ev.ms)}</b>`]
-    if (T.firstToken != null) parts.push(`first token <b>${ms(T.firstToken)}</b>`)
-    if (S.ttfa != null) parts.push(`first audio <b>${ms(S.ttfa)}</b>`)
-    if (T.reasoning) parts.push(`reasoning <b>${T.reasoning.length}</b> chars`)
-    T.foot.innerHTML = parts.join('<span style="opacity:.4"> · </span>')
-    S.currentTurn = null
-  }
 }
-/* 'speak' announces a clip (it is queued); 'playing' and 'spoke' come from a page as the clip
- * actually starts and ends. The console shows what is audible, so it keys off those two. */
-const clipText = new Map(), sentences = new Map()
-function onSpeak(cue) { clipText.set(cue.id, cue.text) }
-function onPlaying(id) {
-  if (S.currentClipId === id) return // a second page reporting the same clip
-  S.speaking = true; S.currentClipId = id; setState(S.state)
-  $('caption').textContent = clipText.get(id) || ''; $('caption').classList.add('on'); markSentence(id, 'now')
+$('btnClearChat').addEventListener('click', () => { S.turns = turnReducer(undefined, { type: 'init' }); renderTurns() })
+function onEvent(ev) {
+  const before = S.turns.speaking
+  S.turns = turnReducer(S.turns, ev)
+  if (ev.type === 'turn' && ev.phase === 'start') { S.turnStart = performance.now(); S.ttfa = null; $('roTtfa').textContent = '…' }
+  if (ev.type === 'clip' && S.ttfa == null) { S.ttfa = performance.now() - S.turnStart; $('roTtfa').textContent = ms(S.ttfa); const t = S.turns.turns.find((x) => !x.done); if (t) t.firstAudio = S.ttfa }
+  if (S.turns.speaking !== before || ev.type === 'stop') setState(S.state)
+  $('caption').textContent = S.turns.caption; $('caption').classList.toggle('on', !!S.turns.caption)
+  renderTurns()
 }
-function onSpoke(id) { markSentence(id, 'done'); if (S.currentClipId === id) { S.speaking = false; S.currentClipId = null; setState(S.state); $('caption').classList.remove('on') } }
-function markSentence(id, cls) { const s = sentences.get(id); if (s) s.className = `s ${cls}` }
-$('btnClearChat').addEventListener('click', () => { $('timeline').innerHTML = '<div class="empty">No turns yet. Send a message below.</div>' })
 
 /* ---------- twitch panel ---------- */
 function onChat(ev) {
   $('twEmpty')?.remove()
   const line = el('div', `line${ev.mentioned ? ' mentioned' : ''}`)
-  const t = el('time', null, new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-  line.append(t, el('b', null, ev.author), document.createTextNode(ev.text))
+  line.append(el('time', null, new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })), el('b', null, ev.author), document.createTextNode(ev.text))
   const log = $('chatlog'); log.prepend(line); while (log.children.length > 200) log.lastChild.remove()
 }
 
-/* ---------- health ---------- */
+/* ---------- health + readiness ---------- */
+function renderReady() {
+  const items = readiness({ health: S.health, egirl: S.brain, modelLoaded: !!preview.contentWindow?.stage?.model })
+  const ul = $('ready'); ul.innerHTML = ''
+  for (const i of items) { const li = el('li', i.ok ? 'ok' : ''); li.append(el('span', null, i.label), el('span', 'd', i.detail)); ul.appendChild(li) }
+  const ok = items.filter((i) => i.ok).length
+  $('readySummary').textContent = `${ok}/${items.length}`
+}
 async function pollHealth() {
   try {
     const h = await fetch('/health').then((r) => r.json())
+    S.health = h
     $('healthJson').textContent = JSON.stringify(h, null, 1)
     const dots = $('railHealth').querySelectorAll('.dot')
     dots[0].className = 'dot ok'; dots[1].className = `dot ${h.voice && !h.voice.error ? 'ok' : 'bad'}`; dots[2].className = `dot ${h.pages > 0 ? 'ok' : ''}`
-    $('railHealth').title = `server ok · voice ${h.voice?.error ? 'down' : 'ok'} · ${h.pages} page(s)`
+    $('railHealth').title = `server ok · voice ${h.voice?.error ? 'down' : 'ok'} · egirl ${h.egirl?.ok ? 'ok' : 'down'} · ${h.pages} page(s)`
     if (h.voice?.rvc) { const sel = $('rvcSel'); const cur = sel.value; sel.innerHTML = '<option value="">off (raw Kokoro)</option>'; for (const n of h.voice.rvc) sel.appendChild(new Option(n, n)); sel.value = S.talent?.rvc && h.voice.rvc.includes(S.talent.rvc) ? S.talent.rvc : cur }
     if (h.twitch) { $('twStatus').textContent = h.twitch.connected ? 'connected' : 'reconnecting'; $('twStatus').style.color = h.twitch.connected ? 'var(--ok)' : 'var(--warn)'; $('twQueued').textContent = h.twitch.queued; $('twDropped').textContent = h.twitch.dropped; $('twSent').textContent = h.twitch.sent }
+    if (app.dataset.panel === 'settings') renderReady()
   } catch { $('railHealth').querySelectorAll('.dot')[0].className = 'dot bad' }
 }
 async function loadTalents() {
@@ -278,17 +316,17 @@ function connect() {
   ws.onmessage = (m) => {
     let ev; try { ev = JSON.parse(m.data) } catch { return }
     switch (ev.type) {
-      case 'load': S.model = ev.model; S.expressions = ev.expressions || []; renderExpressions(); setTimeout(loadParams, 600); if (S.talent) { S.talent.model = ev.model.replace(/^\/models\//, ''); $('talentModel').textContent = S.talent.model; renderModels() } break
+      case 'load': S.model = ev.model; S.expressions = ev.expressions || []; renderExpressions(); setTimeout(loadParams, 600); if (ev.transform) applyTransformUI(ev.transform); if (ev.scene) applySceneUI(ev.scene); if (S.talent) { S.talent.model = ev.model.replace(/^\/models\//, ''); $('talentModel').textContent = S.talent.model; renderModels() } break
       case 'talent': setTalent(ev); break
       case 'state': setState(ev.state, ev.detail); break
       case 'mood': setMood(ev.mood); break
-      case 'speak': onSpeak(ev); break
-      case 'playing': onPlaying(ev.id); break
-      case 'spoke': onSpoke(ev.id); break
-      case 'stop': S.speaking = false; S.currentClipId = null; setState(S.state); $('caption').classList.remove('on'); break
-      case 'clip': addClipStat(ev); onTurnEvent(ev); break
+      case 'transform': if (!draggingTransform) applyTransformUI(ev); break
+      case 'scene': applySceneUI(ev.scene); break
+      case 'logs': for (const l of ev.lines) addLog(l); break
+      case 'log': addLog(ev.text); break
       case 'chat': onChat(ev); break
-      case 'turn': case 'reasoning': case 'token': case 'tool': case 'tool_done': onTurnEvent(ev); break
+      case 'clip': addClipStat(ev); onEvent(ev); break
+      case 'speak': case 'playing': case 'spoke': case 'stop': case 'turn': case 'reasoning': case 'token': case 'tool': case 'tool_done': onEvent(ev); break
     }
   }
 }

@@ -54,3 +54,55 @@ export async function interrupt(talent: TalentConfig): Promise<boolean> {
   ).catch(() => undefined)
   return res?.ok ?? false
 }
+
+const THINKING = ['off', 'low', 'medium', 'high'] as const
+export type ThinkingLevel = (typeof THINKING)[number]
+export const isThinkingLevel = (v: unknown): v is ThinkingLevel =>
+  typeof v === 'string' && (THINKING as readonly string[]).includes(v)
+
+function authHeaders(talent: TalentConfig): Record<string, string> {
+  return talent.egirl_token ? { authorization: `Bearer ${talent.egirl_token}` } : {}
+}
+
+/** What the console's Brain panel shows: the instance's /info and this session's context use. */
+export async function brain(
+  talent: TalentConfig,
+): Promise<{ ok: true; info: unknown; context: unknown } | { ok: false; error: string }> {
+  try {
+    const h = authHeaders(talent)
+    const info = await fetch(`${talent.egirl_url}/info`, {
+      headers: h,
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!info.ok) return { ok: false, error: `HTTP ${info.status}` }
+    const ctx = await fetch(
+      `${talent.egirl_url}/sessions/${encodeURIComponent(talent.session)}/context`,
+      {
+        headers: h,
+        signal: AbortSignal.timeout(4000),
+      },
+    ).catch(() => undefined)
+    return { ok: true, info: await info.json(), context: ctx?.ok ? await ctx.json() : null }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+/** Set the session's thinking level through egirl; returns egirl's own reply. */
+export async function setThinking(talent: TalentConfig, level: ThinkingLevel): Promise<Response> {
+  return fetch(`${talent.egirl_url}/sessions/${encodeURIComponent(talent.session)}/thinking`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders(talent) },
+    body: JSON.stringify({ level }),
+  })
+}
+
+/** Reachability for /health: cheap and bounded. */
+export async function egirlUp(talent: TalentConfig): Promise<boolean> {
+  return fetch(`${talent.egirl_url}/info`, {
+    headers: authHeaders(talent),
+    signal: AbortSignal.timeout(2000),
+  })
+    .then((r) => r.ok)
+    .catch(() => false)
+}

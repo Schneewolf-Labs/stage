@@ -8,9 +8,12 @@
   <nav class="rail" aria-label="Sections">
     <a class="logo" href="/console" title="Stage"><span class="logo-mark"></span></a>
     <button class="rail-btn" data-panel="model" title="Model (M)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>Model</span></button>
+    <button class="rail-btn" data-panel="scene" title="Scene (E)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M3 14l5-4 4 3 4-5 5 6"/></svg><span>Scene</span></button>
     <button class="rail-btn" data-panel="voice" title="Voice (V)"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Voice</span></button>
+    <button class="rail-btn" data-panel="brain" title="Brain (B)"><svg viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 3 3 3 0 0 0 2 3v1a3 3 0 0 0 3 3h1V4zM15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 2 3 3 3 0 0 1-2 3v1a3 3 0 0 1-3 3h-1V4z"/></svg><span>Brain</span></button>
     <button class="rail-btn" data-panel="chat" title="Chat (C)"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Chat</span></button>
     <button class="rail-btn" data-panel="twitch" title="Twitch (T)"><svg viewBox="0 0 24 24"><path d="M5 3h15v11l-4 4h-4l-3 3v-3H5z"/><path d="M11 8v4M15 8v4"/></svg><span>Twitch</span></button>
+    <button class="rail-btn" data-panel="mic" title="Mic (I)"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M6 10a6 6 0 0 0 12 0M12 16v5M9 21h6"/></svg><span>Mic</span></button>
     <button class="rail-btn" data-panel="settings" title="Settings (S)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg><span>Setup</span></button>
     <div class="rail-spacer"></div>
     <div class="rail-health" id="railHealth" title="Health"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
@@ -31,6 +34,10 @@
         <div class="readout"><span class="k">rtf</span><span class="v" id="roRtf">—</span></div>
       </div>
       <div class="hud-actions">
+        <button class="icon-btn danger" id="btnMute" title="Mute the talent (kill switch)"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9l5 6M21 9l-5 6"/></svg></button>
+        <button class="icon-btn" id="btnMonitor" title="Hear the preview (monitor)"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 8a5 5 0 0 1 0 8M18.5 5.5a9 9 0 0 1 0 13"/></svg></button>
+        <button class="icon-btn" id="btnLogs" title="Logs (L)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14"/></svg></button>
+        <span class="hud-sep"></span>
         <button class="icon-btn" id="btnBg" title="Toggle checkerboard (transparent preview)"><svg viewBox="0 0 24 24"><path d="M4 4h8v8H4zM12 12h8v8h-8z"/><path d="M12 4h8v8h-8zM4 12h8v8H4z" opacity=".35"/></svg></button>
         <button class="icon-btn" id="btnCopy" title="Copy OBS browser-source URL"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5h10"/></svg></button>
         <a class="icon-btn" id="btnOpen" href="/" target="_blank" title="Open render page"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg></a>
@@ -38,10 +45,13 @@
     </header>
 
     <div class="stage-frame" id="stageFrame">
-      <iframe id="preview" src="/?mute=1&status=0&caption=0" title="Live preview"></iframe>
+      <iframe id="preview" src="/?mute=1&status=0&caption=0&edit=1" title="Live preview"></iframe>
+      <div class="edit-hint">drag to move · wheel to scale</div>
       <div class="caption" id="caption"></div>
       <div class="toast" id="toast"></div>
     </div>
+
+    <div class="logs" id="logs" hidden><div class="logs-head"><span>Server log</span><button class="link" id="btnClearLogs">clear</button></div><pre id="logLines"></pre></div>
 
     <footer class="transport">
       <div class="chips">
@@ -73,6 +83,26 @@
       <div class="params" id="params"></div>
     </section>
 
+    <section class="pane" data-pane="scene">
+      <h2>Scene</h2>
+      <h3>Placement <button class="link" id="btnResetTransform">reset</button></h3>
+      <p class="help">Drag the model in the preview and scroll to scale, or use the sliders. Saved per model; every page follows, OBS included.</p>
+      <label class="field range"><span>X <b id="txVal">0.00</b></span><input type="range" id="tx" min="-1" max="1" step="0.01" value="0"></label>
+      <label class="field range"><span>Y <b id="tyVal">0.00</b></span><input type="range" id="ty" min="-1" max="1" step="0.01" value="0"></label>
+      <label class="field range"><span>Scale <b id="tsVal">1.00</b>×</span><input type="range" id="ts" min="0.1" max="4" step="0.01" value="1"></label>
+      <h3>Idle motion</h3>
+      <label class="field range"><span>Sway <b id="swayVal">1.00</b></span><input type="range" id="sway" min="0" max="2" step="0.05" value="1"></label>
+      <label class="field range"><span>Speed <b id="mspeedVal">1.00</b></span><input type="range" id="mspeed" min="0.2" max="3" step="0.05" value="1"></label>
+      <label class="field range"><span>Blink every <b id="blinkVal">3.7</b> s</span><input type="range" id="blink" min="1" max="10" step="0.1" value="3.7"></label>
+      <h3>Captions</h3>
+      <label class="field row"><input type="checkbox" id="capShow" checked><span>Show captions on the render page</span></label>
+      <label class="field range"><span>Size <b id="capSizeVal">22</b>px</span><input type="range" id="capSize" min="12" max="48" step="1" value="22"></label>
+      <h3>Background</h3>
+      <div class="copyrow"><input type="color" id="bgColor" value="#1a1023"><button class="btn ghost" id="btnBgApply">Apply</button><button class="btn ghost" id="btnBgClear" title="Transparent (for OBS)">Transparent</button></div>
+      <h3>Scenes <span class="hint">planned</span></h3>
+      <div class="empty">Named scene presets (placement + motion + background) and hotkeys to switch them.</div>
+    </section>
+
     <section class="pane" data-pane="voice">
       <h2>Voice</h2>
       <label class="field"><span>Kokoro voice</span><select id="voiceSel"></select></label>
@@ -93,6 +123,26 @@
       <div class="spark" id="spark"></div>
     </section>
 
+    <section class="pane" data-pane="brain">
+      <h2>Brain <button class="link" id="btnBrainRefresh">refresh</button></h2>
+      <div class="stats" id="brainStats">
+        <div><span class="k">instance</span><span class="v" id="brName">—</span></div>
+        <div><span class="k">model</span><span class="v small" id="brModel">—</span></div>
+        <div><span class="k">context</span><span class="v" id="brCtx">—</span></div>
+        <div><span class="k">reachable</span><span class="v" id="brUp">—</span></div>
+      </div>
+      <div class="ctxbar"><div id="ctxFill"></div></div>
+      <h3>Tools</h3>
+      <p class="help">Tools that act on the world are flagged. A talent that strangers can talk to should have none of them on.</p>
+      <div class="badges" id="toolBadges"></div>
+      <h3>Thinking</h3>
+      <label class="field"><span>Level for this session</span><select id="thinkSel"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+      <div class="copyrow"><button class="btn danger" id="btnAbortTurn">Abort turn</button></div>
+      <h3>Session</h3>
+      <div class="copyrow"><code id="brSession">—</code></div>
+      <pre class="json" id="brainJson">…</pre>
+    </section>
+
     <section class="pane" data-pane="chat">
       <h2>Chat <button class="link" id="btnClearChat">clear</button></h2>
       <div class="timeline" id="timeline"><div class="empty">No turns yet. Send a message below.</div></div>
@@ -109,19 +159,32 @@
       <div class="chatlog" id="chatlog"><div class="empty" id="twEmpty">Add a <code>[talents.&lt;name&gt;.twitch]</code> table to stage.toml to listen to a channel.</div></div>
     </section>
 
+    <section class="pane" data-pane="mic">
+      <h2>Mic <span class="hint">planned</span></h2>
+      <p class="help">Speak as the talent yourself through the RVC voice. Recorded takes already work (<code>stage convert</code>); live passthrough needs a streaming converter and a virtual audio device.</p>
+      <label class="field"><span>Input device</span><select id="micSel"><option>—</option></select></label>
+      <div class="copyrow"><button class="btn primary" id="btnMicStart" disabled>Start live conversion</button><button class="btn ghost" id="btnMicRec" disabled>Record a take</button></div>
+      <div class="meter wide"><div class="meter-fill" id="micLevel"></div></div>
+    </section>
+
     <section class="pane" data-pane="settings">
       <h2>Setup</h2>
+      <h3>Go live <span class="hint" id="readySummary"></span></h3>
+      <ul class="ready" id="ready"></ul>
       <h3>OBS</h3>
       <p class="help">Add a <b>Browser</b> source, 1920×1080, with this URL. The page is transparent and needs no click to play audio inside OBS.</p>
       <div class="copyrow"><code id="obsUrl"></code><button class="btn ghost" id="btnCopy2">Copy</button></div>
       <h3>Talents</h3>
       <div id="talentList" class="talent-list"></div>
+      <h3>Recording <span class="hint">planned</span></h3>
+      <div class="copyrow"><button class="btn ghost" disabled>Record clip</button><span class="help" style="margin:0">Capture the render page with audio to a file.</span></div>
       <h3>Shortcuts</h3>
-      <dl class="keys"><dt>Enter</dt><dd>send</dd><dt>Esc</dt><dd>stop</dd><dt>1–5</dt><dd>moods</dd><dt>N</dt><dd>nod</dd><dt>M V C T S</dt><dd>panels</dd></dl>
+      <dl class="keys"><dt>Enter</dt><dd>send</dd><dt>Esc</dt><dd>stop</dd><dt>1–5</dt><dd>moods</dd><dt>N</dt><dd>nod</dd><dt>L</dt><dd>logs</dd><dt>M E V B C T I S</dt><dd>panels</dd></dl>
+      <div class="empty" style="margin-top:8px">Custom hotkeys (planned): bind keys to moods, gestures, scenes and canned lines.</div>
       <h3>Health</h3>
       <pre class="json" id="healthJson">…</pre>
     </section>
   </aside>
 </div>
-<script src="console.js"></script>
+<script type="module" src="console.js"></script>
 </body></html>

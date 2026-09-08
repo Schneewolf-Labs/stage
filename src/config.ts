@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { parse } from 'smol-toml'
+import { applyOverrides, readOverrides } from './persist'
 
 export interface TwitchConfig {
   channel: string
@@ -133,7 +134,10 @@ export function loadConfig(path = 'stage.toml'): StageConfig {
   } catch {
     throw new Error(`cannot read ${path} (copy stage.example.toml to stage.toml)`)
   }
-  return parseConfig(text)
+  const cfg = parseConfig(text)
+  // Console changes (voice, model) saved in stage.d/<talent>.toml win over stage.toml.
+  for (const t of Object.values(cfg.talents)) applyOverrides(t, readOverrides(t.name))
+  return cfg
 }
 
 export function pickTalent(cfg: StageConfig, name?: string): TalentConfig {

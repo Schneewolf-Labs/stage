@@ -1,12 +1,21 @@
 import { existsSync } from 'node:fs'
 import { join, normalize, resolve } from 'node:path'
 import type { ServerWebSocket } from 'bun'
+import { clampTransform } from '../web/core.js'
 import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
-import { interrupt } from './egirl'
+import { brain, egirlUp, interrupt, isThinkingLevel, setThinking } from './egirl'
 import { findExpressions, findModels } from './models'
 import { perform, type Stage, speak } from './performer'
+import {
+  DIR,
+  type Overrides,
+  readOverrides,
+  type Scene,
+  sceneFrom,
+  writeOverrides,
+} from './persist'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { ConsoleEvent, StageCue, StageReport } from './types'
 import { voiceHealth } from './voice'
@@ -20,7 +29,11 @@ interface Deps {
   cfg: StageConfig
   talent: TalentConfig
   log: (msg: string) => void
+  /** Where per-talent overrides are written; tests point it at a temp dir. */
+  overridesDir?: string
 }
+
+const LOG_BACKLOG = 200
 
 type Role = 'page' | 'console'
 
@@ -38,8 +51,21 @@ function serveUnder(root: string, rel: string): Response {
   return new Response(Bun.file(path))
 }
 
-export function startServer({ cfg, talent, log }: Deps) {
+export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: Deps) {
   const clients = new Map<ServerWebSocket<unknown>, Role>()
+  // Log lines go to the terminal and to every console, with a backlog for late consoles.
+  const backlog: string[] = []
+  const log = (msg: string): void => {
+    baseLog(msg)
+    backlog.push(msg)
+    if (backlog.length > LOG_BACKLOG) backlog.shift()
+    send('console', { type: 'log', text: msg })
+  }
+  // Runtime state the console edits; saved whole to stage.d/<talent>.toml on every change.
+  const overrides: Overrides = readOverrides(talent.name, overridesDir)
+  const save = (): void => writeOverrides(talent.name, overrides, overridesDir)
+  const transformFor = (model: string) => clampTransform(overrides.transforms?.[model])
+  let muted = false
   const clips = new Map<string, ArrayBuffer>()
   // Clips announced but not yet reported spoken by a page; expires on its own in case no page does.
   const pendingSpoke = new Map<string, ReturnType<typeof setTimeout>>()
@@ -51,6 +77,8 @@ export function startServer({ cfg, talent, log }: Deps) {
     model: `/models/${talent.model}`,
     talent: talent.name,
     expressions: findExpressions(cfg.server.models_dir, talent.model),
+    transform: transformFor(talent.model),
+    scene: sceneFrom(overrides),
   })
   const talentEvent = (): ConsoleEvent => ({
     type: 'talent',
@@ -60,6 +88,9 @@ export function startServer({ cfg, talent, log }: Deps) {
     ...(talent.rvc ? { rvc: talent.rvc } : {}),
     speed: talent.speed,
     pitch: talent.pitch,
+    muted,
+    transform: transformFor(talent.model),
+    scene: sceneFrom(overrides),
   })
   const send = (role: Role | undefined, o: unknown): void => {
     const msg = JSON.stringify(o)
@@ -70,6 +101,7 @@ export function startServer({ cfg, talent, log }: Deps) {
     cue: (c) => send(undefined, c),
     event: (e) => send('console', e),
     generation: () => generation,
+    muted: () => muted,
     addClip(wav, seconds) {
       const id = `${Date.now().toString(36)}-${(clipSeq++).toString(36)}`
       clips.set(id, wav)
@@ -125,7 +157,9 @@ export function startServer({ cfg, talent, log }: Deps) {
     pages: [...clients.values()].filter((r) => r === 'page').length,
     consoles: [...clients.values()].filter((r) => r === 'console').length,
     busy: isBusy(),
+    muted,
     voice: await voiceHealth(cfg.voice.url).catch((e) => ({ error: String(e) })),
+    egirl: { ok: await egirlUp(talent) },
     ...(twitch && batcher
       ? { twitch: { ...twitch.stats(), queued: batcher.size, dropped: batcher.dropped } }
       : {}),
@@ -160,6 +194,7 @@ export function startServer({ cfg, talent, log }: Deps) {
             talents: Object.keys(cfg.talents),
             twitch: !!talent.twitch,
           })
+        if (path === '/egirl') return json(await brain(talent))
         return serveUnder(WEB_DIR, path)
       }
       if (req.method === 'POST') {
@@ -167,6 +202,10 @@ export function startServer({ cfg, talent, log }: Deps) {
         if (path === '/say') {
           if (typeof body.text !== 'string' || !body.text.trim())
             return json({ error: 'text required' }, 400)
+          if (muted) {
+            log(`muted, skipped: ${body.text}`)
+            return json({ ok: true, muted: true, sentences: 0 })
+          }
           // Sentence by sentence, so inline cue tags land where they were written.
           const chunker = new SentenceChunker()
           const parts = chunker.push(`${body.text} `)
@@ -204,9 +243,61 @@ export function startServer({ cfg, talent, log }: Deps) {
           )
             return json({ error: 'model must be a path under models_dir' }, 400)
           talent.model = body.model
+          overrides.model = body.model
+          save()
           stage.cue(loadCue())
           stage.event(talentEvent())
           return json({ ok: true })
+        }
+        if (path === '/transform') {
+          for (const k of ['x', 'y', 'scale'])
+            if (k in body && typeof body[k] !== 'number')
+              return json({ error: `${k} must be a number` }, 400)
+          const t = clampTransform({ ...transformFor(talent.model), ...body })
+          overrides.transforms = { ...overrides.transforms, [talent.model]: t }
+          save()
+          stage.cue({ type: 'transform', ...t })
+          stage.event(talentEvent())
+          return json({ ok: true, ...t })
+        }
+        if (path === '/scene') {
+          const cur = sceneFrom(overrides)
+          const pick = <K extends keyof Scene>(k: K): Scene[K] =>
+            typeof body[k] === 'object' && body[k]
+              ? { ...cur[k], ...(body[k] as Partial<Scene[K]>) }
+              : cur[k]
+          overrides.scene = {
+            motion: pick('motion'),
+            captions: pick('captions'),
+            background: pick('background'),
+          }
+          save()
+          stage.cue({ type: 'scene', scene: sceneFrom(overrides) })
+          stage.event(talentEvent())
+          return json({ ok: true, scene: sceneFrom(overrides) })
+        }
+        if (path === '/mute') {
+          muted = body.on === true
+          log(muted ? 'muted: the talent is silenced' : 'unmuted')
+          if (muted) {
+            generation++
+            stage.cue({ type: 'stop' })
+            for (const t of pendingSpoke.values()) clearTimeout(t)
+            pendingSpoke.clear()
+          }
+          stage.event(talentEvent())
+          return json({ ok: true, muted })
+        }
+        if (path === '/egirl/thinking') {
+          if (!isThinkingLevel(body.level))
+            return json({ error: 'level must be off, low, medium or high' }, 400)
+          const r = await setThinking(talent, body.level).catch(
+            (e: Error) => new Response(e.message, { status: 502 }),
+          )
+          return new Response(await r.text(), {
+            status: r.status,
+            headers: { 'content-type': 'application/json' },
+          })
         }
         if (path === '/voice') {
           // Live voice settings; the next sentence uses them. Not persisted to stage.toml.
@@ -215,6 +306,13 @@ export function startServer({ cfg, talent, log }: Deps) {
           if (typeof body.pitch === 'number') talent.pitch = Math.round(body.pitch)
           if (body.rvc === null || body.rvc === '') delete talent.rvc
           else if (typeof body.rvc === 'string') talent.rvc = body.rvc
+          Object.assign(overrides, {
+            voice: talent.voice,
+            rvc: talent.rvc ?? '',
+            pitch: talent.pitch,
+            speed: talent.speed,
+          })
+          save()
           stage.event(talentEvent())
           return json({ ok: true, ...talentEvent() })
         }
@@ -237,7 +335,10 @@ export function startServer({ cfg, talent, log }: Deps) {
         if (r?.type === 'ready') {
           const role: Role = r.role === 'console' ? 'console' : 'page'
           clients.set(ws, role)
-          if (role === 'console') ws.send(JSON.stringify(talentEvent()))
+          if (role === 'console') {
+            ws.send(JSON.stringify(talentEvent()))
+            ws.send(JSON.stringify({ type: 'logs', lines: [...backlog] }))
+          }
           log(`${role} connected (${clients.size})`)
         } else if (r?.type === 'playing') {
           stage.event({ type: 'playing', id: r.id })

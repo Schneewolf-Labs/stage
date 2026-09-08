@@ -13,7 +13,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 Bun.serve({
   port,
   async fetch(req) {
-    if (new URL(req.url).pathname !== '/chat') return new Response('not found', { status: 404 })
+    const path = new URL(req.url).pathname
+    if (path === '/info')
+      return Response.json({ name: 'fake', instance: 'fake', persona: 'dev', model: 'fake-27b', contextLength: 32768, thinking: 'low', tools: { files: true, exec: true, git: false, memory: true, browser: false, github: false, tasks: false, codeAgent: false, peers: false } })
+    if (path.endsWith('/context')) return Response.json({ used: 9100, limit: 32768 })
+    if (path.endsWith('/thinking')) return Response.json({ ok: true, thinking: ((await req.json().catch(() => ({}))) as { level?: string }).level })
+    if (path.endsWith('/interrupt')) return Response.json({ ok: true, delivered: true })
+    if (path !== '/chat') return new Response('not found', { status: 404 })
     const enc = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       async start(c) {

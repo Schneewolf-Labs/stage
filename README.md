@@ -50,8 +50,20 @@ same cues), the talent's state, a level meter and latency readouts, and panels f
 (picker with hot-swap, expressions, every Cubism parameter as a live slider you can pin), the
 voice (Kokoro voice, RVC model, pitch, speed, a test line, per-clip latency), the chat (each
 turn as a timeline: reasoning, tool calls, sentences lighting up as they are spoken, timing),
-Twitch (connection, queue, live lines) and setup (OBS URL, talents, shortcuts, health). Moods
-and gestures are one click or one key away; Esc stops the talent mid-sentence.
+Twitch (connection, queue, live lines) and setup (a go-live checklist, OBS URL, talents,
+shortcuts, health). Moods and gestures are one click or one key away; Esc stops the talent
+mid-sentence.
+
+Also in the console: **Scene** (drag the model in the preview and scroll to scale, saved per
+model; idle sway, blink rate, caption size, background colour), **Brain** (the talent's egirl
+instance: model, context use, which tools are enabled with the world-acting ones flagged,
+thinking level, abort), a **kill switch** that silences the talent instantly, a monitor toggle
+to hear the preview, and a server log drawer. Everything the console changes is saved to
+`stage.d/<talent>.toml` (gitignored) and wins over `stage.toml` on the next start; delete the
+file to reset.
+
+Planned and stubbed in the UI: mic passthrough (live RVC on your own voice), clip recording,
+named scene presets, custom hotkeys.
 
 ## Cue Tags
 
@@ -83,7 +95,12 @@ chat, cue tags stripped.
 | POST | `/cue` | a cue object | raw cue passthrough, e.g. `{"type":"mood","mood":"sad"}` |
 | POST | `/interrupt` | | stop talking now: cut audio, drop queued clips, abort the egirl turn |
 | POST | `/model` | `{model}` | hot-swap the Live2D model (path under models_dir) on every page |
-| POST | `/voice` | `{voice?, rvc?, pitch?, speed?}` | live voice settings for the next sentence (not persisted) |
+| POST | `/voice` | `{voice?, rvc?, pitch?, speed?}` | live voice settings for the next sentence, saved to stage.d |
+| POST | `/transform` | `{x?, y?, scale?}` | place the model on the canvas (fractions of the screen, scale x), saved per model |
+| POST | `/scene` | `{motion?, captions?, background?}` | idle motion, caption style, background, saved |
+| POST | `/mute` | `{on}` | kill switch: stop now and synthesize nothing until unmuted |
+| GET | `/egirl` | | the talent's egirl `/info` and session context, for the Brain panel |
+| POST | `/egirl/thinking` | `{level}` | set the session's thinking level (off/low/medium/high) |
 | GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
 | GET | `/talent` | | the running talent's settings and the names of all configured talents |
 | GET | `/console` | | the operator console |
@@ -126,7 +143,9 @@ src/
   performer.ts  egirl events -> voice -> cues
   voice.ts      voice service client
   models.ts     model + .exp3 discovery under models_dir
-web/            render page (index.html + stage.js), console (console.html/css/js), vendored libs
+  persist.ts    stage.d/<talent>.toml overrides (voice, model, placement, scene)
+web/            render page (index.html + stage.js), console (console.html/css/js), core.js (pure
+                logic shared by both and unit-tested), vendored libs
 services/voice/ Kokoro + RVC HTTP service
 test/           bun test
 ```
@@ -136,3 +155,8 @@ test/           bun test
 ```bash
 bun test && bun run lint && bun run typecheck
 ```
+
+`test/server.test.ts` boots the real server against a fake voice service and a fake egirl on
+ephemeral ports and drives every endpoint and both WebSocket roles; it is the contract the
+console is written against. `test/core.test.ts` covers the shared UI logic. Add the test
+before the feature.

@@ -11,6 +11,8 @@ export interface Stage {
   generation(): number
   /** Tell consoles what is happening. Pages never see these. */
   event(e: ConsoleEvent): void
+  /** Kill switch: while muted nothing is synthesized or announced. */
+  muted(): boolean
   /** Store a clip and return the URL the page fetches it from. `seconds` bounds how long it counts as speaking. */
   addClip(wav: ArrayBuffer, seconds: number): { id: string; url: string }
 }
@@ -32,6 +34,10 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   for (const m of line.moods) stage.cue({ type: 'mood', mood: m })
   for (const g of line.gestures) stage.cue({ type: 'gesture', name: g satisfies Gesture })
   if (!line.text) return
+  if (stage.muted()) {
+    log?.(`muted, skipped: ${line.text}`)
+    return
+  }
   const t0 = performance.now()
   const gen = stage.generation()
   const clip = await synthesize(voiceUrl, talent, line.text)
@@ -109,6 +115,7 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
     await speaking
     stage.cue({ type: 'state', state: 'idle' })
   }
-  stage.event({ type: 'turn', phase: 'done', reply, ms: Math.round(performance.now() - t0) })
-  return reply
+  const text = reply.trim()
+  stage.event({ type: 'turn', phase: 'done', reply: text, ms: Math.round(performance.now() - t0) })
+  return text
 }
