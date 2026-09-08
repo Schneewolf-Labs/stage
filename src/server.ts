@@ -12,6 +12,8 @@ import { perform, type Stage, speak } from './performer'
 import {
   DIR,
   directorFrom,
+  HOTKEY_ACTIONS,
+  type Hotkey,
   type Overrides,
   readOverrides,
   type Scene,
@@ -95,6 +97,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     transform: transformFor(talent.model),
     scene: sceneFrom(overrides),
     director: directorFrom(overrides),
+    hotkeys: overrides.hotkeys ?? [],
   })
   const send = (role: Role | undefined, o: unknown): void => {
     const msg = JSON.stringify(o)
@@ -167,6 +170,43 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     setInterval(() => b.tick(), tw.interval_ms)
   }
 
+  const presetName = (v: unknown): string | undefined =>
+    typeof v === 'string' && /^[\w][\w -]{0,39}$/.test(v.trim()) ? v.trim() : undefined
+  const fireHotkey = async (h: Hotkey): Promise<void> => {
+    switch (h.action) {
+      case 'mood':
+        stage.cue({ type: 'mood', mood: h.value as 'happy' })
+        return
+      case 'gesture':
+        stage.cue({ type: 'gesture', name: h.value as 'nod' })
+        return
+      case 'say':
+        if (!muted) await speak(opts, h.value)
+        return
+      case 'preset': {
+        const p = overrides.presets?.[h.value]
+        if (!p) return
+        overrides.transforms = { ...overrides.transforms, [talent.model]: p.transform }
+        overrides.scene = p.scene
+        save()
+        stage.cue({ type: 'transform', ...p.transform })
+        stage.cue({ type: 'scene', scene: sceneFrom(overrides) })
+        stage.event(talentEvent())
+        return
+      }
+      case 'stop':
+        generation++
+        script.stop()
+        stage.cue({ type: 'stop' })
+        return
+      case 'mute':
+        muted = !muted
+        if (muted) stage.cue({ type: 'stop' })
+        stage.event(talentEvent())
+        return
+    }
+  }
+
   const health = async () => ({
     ok: true,
     talent: talent.name,
@@ -213,6 +253,8 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
         }
         if (path === '/health') return json(await health())
         if (path === '/models.json') return json(findModels(cfg.server.models_dir))
+        if (path === '/presets')
+          return json(Object.entries(overrides.presets ?? {}).map(([name, p]) => ({ name, ...p })))
         if (path === '/talent')
           return json({
             ...talentEvent(),
@@ -376,6 +418,64 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             `twitch: ${twitchPaused ? 'paused' : 'listening'}, replies ${twitchReply ? 'on' : 'off'}`,
           )
           return json({ ok: true, paused: twitchPaused, reply: twitchReply })
+        }
+        if (path === '/presets') {
+          const name = presetName(body.name)
+          if (!name) return json({ error: 'name required: letters, digits, space, - _' }, 400)
+          overrides.presets = {
+            ...overrides.presets,
+            [name]: { transform: transformFor(talent.model), scene: sceneFrom(overrides) },
+          }
+          save()
+          log(`preset saved: ${name}`)
+          return json({ ok: true, name })
+        }
+        if (path === '/presets/apply') {
+          const name = presetName(body.name)
+          const p = name ? overrides.presets?.[name] : undefined
+          if (!p) return json({ error: 'no such preset' }, 404)
+          overrides.transforms = { ...overrides.transforms, [talent.model]: p.transform }
+          overrides.scene = p.scene
+          save()
+          stage.cue({ type: 'transform', ...p.transform })
+          stage.cue({ type: 'scene', scene: sceneFrom(overrides) })
+          stage.event(talentEvent())
+          return json({ ok: true, name })
+        }
+        if (path === '/presets/delete') {
+          const name = presetName(body.name)
+          if (name && overrides.presets?.[name]) {
+            delete overrides.presets[name]
+            save()
+          }
+          return json({ ok: true })
+        }
+        if (path === '/hotkeys') {
+          if (!Array.isArray(body.hotkeys)) return json({ error: 'hotkeys must be a list' }, 400)
+          const list: Hotkey[] = []
+          for (const h of body.hotkeys as unknown[]) {
+            const k = h as Partial<Hotkey>
+            if (typeof k.key !== 'string' || !k.key || !HOTKEY_ACTIONS.includes(k.action as never))
+              return json(
+                { error: `bad hotkey; action must be one of ${HOTKEY_ACTIONS.join(', ')}` },
+                400,
+              )
+            list.push({
+              key: k.key,
+              action: k.action as Hotkey['action'],
+              value: typeof k.value === 'string' ? k.value : '',
+            })
+          }
+          overrides.hotkeys = list
+          save()
+          stage.event(talentEvent())
+          return json({ ok: true, hotkeys: list })
+        }
+        if (path === '/hotkeys/fire') {
+          const h = (overrides.hotkeys ?? []).find((x) => x.key === body.key)
+          if (!h) return json({ error: 'no such hotkey' }, 404)
+          await fireHotkey(h)
+          return json({ ok: true, action: h.action })
         }
         if (path === '/egirl/thinking') {
           if (!isThinkingLevel(body.level))

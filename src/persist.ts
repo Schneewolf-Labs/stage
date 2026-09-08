@@ -32,6 +32,29 @@ export interface Director {
  * `stage.d/<talent>.toml` (gitignored) so stage.toml, the human-written file, is never rewritten.
  * Loaded on top of the talent's config; written whole on every change (it is tiny).
  */
+/** A named snapshot of how the stage looks: placement of the current model and the scene. */
+export interface Preset {
+  transform: Transform
+  scene: Scene
+}
+
+export type HotkeyAction = 'mood' | 'gesture' | 'say' | 'preset' | 'stop' | 'mute'
+export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
+  'mood',
+  'gesture',
+  'say',
+  'preset',
+  'stop',
+  'mute',
+]
+
+/** A console key bound to an action; `value` is the mood, gesture, line or preset name. */
+export interface Hotkey {
+  key: string
+  action: HotkeyAction
+  value: string
+}
+
 export interface Overrides {
   voice?: string
   rvc?: string | null
@@ -41,6 +64,8 @@ export interface Overrides {
   transforms?: Record<string, Transform>
   scene?: { [K in keyof Scene]?: Partial<Scene[K]> }
   director?: Partial<Director>
+  presets?: Record<string, Preset>
+  hotkeys?: Hotkey[]
 }
 
 export const DEFAULT_SCENE: Scene = {

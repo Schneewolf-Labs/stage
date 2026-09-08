@@ -1,0 +1,25 @@
+# One stage per talent, named by the part after the @:
+#
+#   systemctl --user enable --now stage@springfield
+#   systemctl --user enable --now stage@emma   # runs on the port in stage.toml; pass --port via
+#                                              # a drop-in if two talents must run at once
+#   journalctl --user -u stage@springfield -f
+
+[Unit]
+Description=Stage for talent %i
+Documentation=https://github.com/Schneewolf-Labs/stage
+After=network-online.target stage-voice.service
+Wants=stage-voice.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/stage
+ExecStart=%h/.bun/bin/bun run src/index.ts serve --talent %i
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=15
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

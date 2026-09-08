@@ -583,3 +583,67 @@ describe('lipsync track', () => {
     page.close()
   })
 })
+
+describe('presets', () => {
+  test('save a preset from the current scene, list, apply, delete', async () => {
+    const page = await client()
+    await post('/transform', { x: 0.4, y: 0, scale: 1.2 })
+    await post('/scene', { background: { color: '#112233' } })
+    const r = await post('/presets', { name: 'game' }).then((x) => x.json())
+    expect(r.ok).toBe(true)
+    const list = await get('/presets')
+    expect(list.map((p: { name: string }) => p.name)).toContain('game')
+    const game = list.find((p: { name: string }) => p.name === 'game')
+    expect(game.transform).toEqual({ x: 0.4, y: 0, scale: 1.2 })
+    expect(game.scene.background.color).toBe('#112233')
+    expect(readOverrides('test', overridesDir).presets?.game?.transform?.x).toBe(0.4)
+    // change things, then apply the preset: transform and scene cues go out, talent reflects it
+    await post('/transform', { x: 0, y: 0, scale: 1 })
+    await post('/scene', { background: { color: '' } })
+    await post('/presets/apply', { name: 'game' })
+    await page.waitFor((m) => m.type === 'transform' && m.x === 0.4 && m.scale === 1.2)
+    await page.waitFor(
+      (m) =>
+        m.type === 'scene' &&
+        (m.scene as { background: { color: string } }).background.color === '#112233',
+    )
+    expect((await get('/talent')).transform).toEqual({ x: 0.4, y: 0, scale: 1.2 })
+    expect((await post('/presets/apply', { name: 'nope' })).status).toBe(404)
+    await post('/presets/delete', { name: 'game' })
+    expect((await get('/presets')).map((p: { name: string }) => p.name)).not.toContain('game')
+    await post('/transform', { x: 0, y: 0, scale: 1 })
+    await post('/scene', { background: { color: '' } })
+    page.close()
+  })
+  test('preset names are validated', async () => {
+    expect((await post('/presets', { name: '' })).status).toBe(400)
+    expect((await post('/presets', { name: 'a/b' })).status).toBe(400)
+  })
+})
+
+describe('hotkeys', () => {
+  test('hotkeys persist and describe an action; a canned line can be fired by name', async () => {
+    const page = await client()
+    const r = await post('/hotkeys', {
+      hotkeys: [
+        { key: 'F1', action: 'mood', value: 'happy' },
+        { key: 'F2', action: 'say', value: '[nod] Be right back, chat.' },
+        { key: 'F3', action: 'preset', value: 'game' },
+      ],
+    }).then((x) => x.json())
+    expect(r.ok).toBe(true)
+    expect((await get('/talent')).hotkeys).toHaveLength(3)
+    expect(readOverrides('test', overridesDir).hotkeys?.[1]?.value).toBe(
+      '[nod] Be right back, chat.',
+    )
+    await post('/hotkeys/fire', { key: 'F2' })
+    await page.waitFor((m) => m.type === 'speak' && m.text === 'Be right back, chat.')
+    await post('/hotkeys/fire', { key: 'F1' })
+    await page.waitFor((m) => m.type === 'mood' && m.mood === 'happy')
+    expect((await post('/hotkeys/fire', { key: 'F9' })).status).toBe(404)
+    expect(
+      (await post('/hotkeys', { hotkeys: [{ key: 'F1', action: 'launch', value: 'x' }] })).status,
+    ).toBe(400)
+    page.close()
+  })
+})

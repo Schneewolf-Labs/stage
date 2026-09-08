@@ -207,3 +207,13 @@ code { font-family: var(--mono); font-size: 12px }
 
 .transcripts { display: flex; flex-direction: column; gap: 6px } .transcripts .line b { color: var(--accent) }
 #btnPtt.on { background: var(--err); border-color: var(--err); box-shadow: 0 0 18px rgba(255, 95, 135, .6) }
+
+.preset-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px }
+.preset { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--bg2); border: 1px solid var(--line) }
+.preset b { flex: 1; font-weight: 500 } .preset .link { margin-left: 0 }
+.hotkeys { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px }
+.hotkey { display: grid; grid-template-columns: 64px 92px 1fr 24px; gap: 6px; align-items: center }
+.hotkey .key { text-align: center; font: 12px var(--mono); padding: 8px 4px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2); cursor: pointer }
+.hotkey .key.listening { border-color: var(--accent); box-shadow: 0 0 10px rgba(255, 95, 175, .4) }
+.hotkey select, .hotkey input { padding: 7px 8px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg2); color: var(--text); outline: none; font-size: 12px; min-width: 0 }
+.hotkey .x { color: var(--dim); font-size: 16px; text-align: center } .hotkey .x:hover { color: var(--err) }

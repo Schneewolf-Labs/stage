@@ -56,7 +56,7 @@ function setTalent(t) {
   setRange('pitch', 'pitchVal', t.pitch, (v) => v); setRange('speed', 'speedVal', t.speed, (v) => v.toFixed(2))
   $('btnMute').classList.toggle('on', !!t.muted); $('btnMute').title = t.muted ? 'Unmute the talent' : 'Mute the talent (kill switch)'
   if (t.muted) toast('Talent is muted')
-  applyTransformUI(t.transform); applySceneUI(t.scene); applyDirectorUI(t.director)
+  applyTransformUI(t.transform); applySceneUI(t.scene); applyDirectorUI(t.director); S.hotkeys = t.hotkeys || []; renderHotkeys(); loadPresets()
   $('brSession').textContent = `session ${t.name}`
   renderModels()
 }
@@ -111,15 +111,26 @@ $('btnSay').addEventListener('click', async () => { const text = composer.value.
 $('btnStop').addEventListener('click', () => post('/interrupt').then(() => toast('Stopped')))
 document.querySelectorAll('.chip[data-mood]').forEach((c) => c.addEventListener('click', () => post('/cue', { type: 'mood', mood: c.dataset.mood })))
 document.querySelectorAll('.chip[data-gesture]').forEach((c) => c.addEventListener('click', () => post('/cue', { type: 'gesture', name: c.dataset.gesture })))
-document.addEventListener('keydown', (e) => {
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')
+function handleKey(e) {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') && !e.fromPreview
   if (e.key === 'Escape') { post('/interrupt'); toast('Stopped'); return }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+  const custom = S.hotkeys.find((h) => h.key === (e.key === ' ' ? 'Space' : e.key))
+  if (custom && !e.repeat) { e.preventDefault(); post('/hotkeys/fire', { key: custom.key }).then((r) => toast(r.error || `${custom.action}${custom.value ? `: ${custom.value.slice(0, 30)}` : ''}`)); return }
   if (MOOD_KEYS[e.key]) post('/cue', { type: 'mood', mood: MOOD_KEYS[e.key] })
   else if (e.key === 'n') post('/cue', { type: 'gesture', name: 'nod' })
   else if (e.key === 'l') toggleLogs()
   else if (PANEL_KEYS[e.key]) showPanel(PANEL_KEYS[e.key])
   else if (e.key === '/') { e.preventDefault(); composer.focus() }
+}
+document.addEventListener('keydown', handleKey)
+// The preview iframe forwards its keystrokes (see stage.js) so hotkeys keep working after a
+// click on the model; key-ups matter for push-to-talk.
+window.addEventListener('message', (m) => {
+  if (m.data?.type !== 'stage-key') return
+  const e = { ...m.data, fromPreview: true, preventDefault() {} }
+  if (m.data.event === 'keydown') { if (e.code === 'Space' && !e.repeat) micStart(); else handleKey(e) }
+  else if (e.code === 'Space' && mic.recording) micStop()
 })
 
 /* ---------- model panel ---------- */
@@ -211,6 +222,40 @@ const pushCaptions = debounce(() => post('/scene', { captions: { show: $('capSho
 $('capShow').addEventListener('change', pushCaptions); bindRange('capSize', 'capSizeVal', (v) => v, pushCaptions)
 $('btnBgApply').addEventListener('click', () => post('/scene', { background: { color: $('bgColor').value } }))
 $('btnBgClear').addEventListener('click', () => post('/scene', { background: { color: '' } }))
+
+/* ---------- presets ---------- */
+async function loadPresets() {
+  const list = await fetch('/presets').then((r) => r.json()).catch(() => [])
+  const box = $('presetList'); box.innerHTML = ''
+  if (!list.length) box.appendChild(el('div', 'empty', 'No presets yet.'))
+  for (const p of list) {
+    const row = el('div', 'preset')
+    const apply = el('button', 'btn ghost', 'Apply'); apply.addEventListener('click', () => post('/presets/apply', { name: p.name }).then(() => toast(`Preset: ${p.name}`)))
+    const del = el('button', 'link', 'delete'); del.addEventListener('click', () => post('/presets/delete', { name: p.name }).then(loadPresets))
+    row.append(el('b', null, p.name), el('span', 'help', `${(p.transform.scale).toFixed(2)}× · ${p.scene.background.color || p.scene.background.image || 'transparent'}`), apply, del)
+    box.appendChild(row)
+  }
+}
+$('btnPresetSave').addEventListener('click', () => { const name = $('presetName').value.trim(); if (!name) return toast('Name the preset'); post('/presets', { name }).then((r) => { if (r.error) return toast(r.error); $('presetName').value = ''; toast(`Saved ${r.name}`); loadPresets() }) })
+
+/* ---------- hotkeys ---------- */
+const HOTKEY_ACTIONS = ['mood', 'gesture', 'say', 'preset', 'stop', 'mute']
+S.hotkeys = []
+function renderHotkeys() {
+  const box = $('hotkeys'); box.innerHTML = ''
+  S.hotkeys.forEach((h, i) => {
+    const row = el('div', 'hotkey')
+    const key = el('button', 'key', h.key || 'press…'); key.title = 'Click, then press a key'
+    key.addEventListener('click', () => { key.classList.add('listening'); key.textContent = '…'; const on = (e) => { e.preventDefault(); e.stopPropagation(); h.key = e.key === ' ' ? 'Space' : e.key; document.removeEventListener('keydown', on, true); renderHotkeys(); saveHotkeys() }; document.addEventListener('keydown', on, true) })
+    const act = el('select'); for (const a of HOTKEY_ACTIONS) act.appendChild(new Option(a, a)); act.value = h.action; act.addEventListener('change', () => { h.action = act.value; saveHotkeys() })
+    const val = el('input'); val.value = h.value || ''; val.placeholder = { mood: 'happy', gesture: 'nod', say: 'a line to say', preset: 'preset name' }[h.action] || '—'; val.disabled = h.action === 'stop' || h.action === 'mute'
+    val.addEventListener('change', () => { h.value = val.value; saveHotkeys() })
+    const x = el('button', 'x', '×'); x.addEventListener('click', () => { S.hotkeys.splice(i, 1); renderHotkeys(); saveHotkeys() })
+    row.append(key, act, val, x); box.appendChild(row)
+  })
+}
+const saveHotkeys = debounce(() => post('/hotkeys', { hotkeys: S.hotkeys.filter((h) => h.key) }).then((r) => r.error && toast(r.error)), 200)
+$('btnHotkeyAdd').addEventListener('click', () => { S.hotkeys.push({ key: '', action: 'say', value: '' }); renderHotkeys() })
 
 /* ---------- voice panel ---------- */
 { const sel = $('voiceSel'); for (const [group, list] of Object.entries(VOICES)) { const og = el('optgroup'); og.label = group; for (const v of list) og.appendChild(new Option(v, v)); sel.appendChild(og) } }

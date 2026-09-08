@@ -107,8 +107,9 @@
       <div class="copyrow"><input type="color" id="bgColor" value="#1a1023"><button class="btn ghost" id="btnBgApply">Apply</button><button class="btn ghost" id="btnBgClear" title="Transparent (for OBS)">Transparent</button></div>
       <label class="field"><span>Image (path under models_dir, or a URL)</span><input id="bgImage" placeholder="backgrounds/room.png"></label>
       <div class="copyrow"><button class="btn ghost" id="btnBgImage">Set image</button><button class="btn ghost" id="btnBgImageClear">No image</button></div>
-      <h3>Scenes <span class="hint">planned</span></h3>
-      <div class="empty">Named scene presets (placement + motion + background) and hotkeys to switch them.</div>
+      <h3>Presets <span class="hint">placement + motion + captions + background + screen</span></h3>
+      <div class="copyrow"><input id="presetName" placeholder="name, e.g. game"><button class="btn ghost" id="btnPresetSave">Save current</button></div>
+      <div class="preset-list" id="presetList"><div class="empty">No presets yet.</div></div>
     </section>
 
     <section class="pane" data-pane="voice">
@@ -212,7 +213,9 @@ First, open the settings page.
       <div class="copyrow"><button class="btn ghost" disabled>Record clip</button><span class="help" style="margin:0">Capture the render page with audio to a file.</span></div>
       <h3>Shortcuts</h3>
       <dl class="keys"><dt>Enter</dt><dd>send</dd><dt>Esc</dt><dd>stop</dd><dt>1–5</dt><dd>moods</dd><dt>N</dt><dd>nod</dd><dt>L</dt><dd>logs</dd><dt>M E V B D C T I S</dt><dd>panels</dd></dl>
-      <div class="empty" style="margin-top:8px">Custom hotkeys (planned): bind keys to moods, gestures, scenes and canned lines.</div>
+      <h3>Custom hotkeys <span class="hint">work while the console is focused</span></h3>
+      <div class="hotkeys" id="hotkeys"></div>
+      <div class="copyrow"><button class="btn ghost" id="btnHotkeyAdd">Add hotkey</button><span class="help" style="margin:0">Click a key box, then press the key. Actions: mood, gesture, say (a canned line), preset, stop, mute.</span></div>
       <h3>Health</h3>
       <pre class="json" id="healthJson">…</pre>
     </section>

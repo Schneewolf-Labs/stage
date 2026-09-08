@@ -1,4 +1,4 @@
-import type { Director, Scene, Transform } from './persist'
+import type { Director, Hotkey, Scene, Transform } from './persist'
 import type { MouthTrack } from './voice'
 
 /** Events egirl's `POST /chat` (stream: true) emits as SSE `data:` frames. */
@@ -85,6 +85,7 @@ export type ConsoleEvent =
       transform: Transform
       scene: Scene
       director: Director
+      hotkeys: Hotkey[]
     }
   /** A script of lines being read: progress as each line is queued. */
   | { type: 'script'; phase: 'start' | 'line' | 'done' | 'stopped'; index?: number; total: number }

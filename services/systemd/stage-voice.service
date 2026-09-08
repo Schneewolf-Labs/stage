@@ -1,0 +1,29 @@
+# The voice service (Kokoro + RVC + whisper). One per machine; stages share it.
+#
+#   mkdir -p ~/.config/systemd/user && cp services/systemd/*.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now stage-voice
+#   journalctl --user -u stage-voice -f
+#
+# User units, like egirl's: the models and venv live in $HOME. `loginctl enable-linger $USER`
+# once if it should start at boot rather than at first login.
+
+[Unit]
+Description=Stage voice service
+Documentation=https://github.com/Schneewolf-Labs/stage
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/stage/services/voice
+Environment=PORT=8100
+Environment=DEVICE=cuda
+# Preload the RVC models your talents use so the first sentence is not the slow one.
+ExecStart=%h/Projects/stage/services/voice/run.sh --preload-rvc egirl
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

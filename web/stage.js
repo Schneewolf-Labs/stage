@@ -227,6 +227,14 @@ if (editable) {
   view.addEventListener('wheel', (e) => { e.preventDefault(); transform = clampTransform({ ...transform, scale: transform.scale * (e.deltaY < 0 ? 1.06 : 1 / 1.06) }); fitNow(); push() }, { passive: false })
 }
 
+/* ---- embedded in the console: keystrokes belong to the console, not to this page ---- */
+if (window.parent !== window) {
+  for (const type of ['keydown', 'keyup'])
+    document.addEventListener(type, (e) => {
+      window.parent.postMessage({ type: 'stage-key', event: type, key: e.key, code: e.code, repeat: e.repeat, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey }, '*')
+    })
+}
+
 /* ---- websocket with reconnect ---- */
 let ws
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)) }

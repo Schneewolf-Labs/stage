@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
+import { copyFileSync, existsSync } from 'node:fs'
 import { loadConfig, pickTalent } from './config'
+import { doctor } from './doctor'
 import { startServer } from './server'
 import { convert } from './voice'
 
 const HELP = `stage -- VTuber harness for egirl agents
 
+  bun run src/index.ts init                                          create stage.toml from the example
+  bun run src/index.ts doctor [--config stage.toml]                  check models, voice service, every talent's egirl and tools
   bun run src/index.ts serve [--talent NAME] [--port N] [--config stage.toml]   run the stage server
   bun run src/index.ts say  "text" [--url http://127.0.0.1:3100]      speak a line on a running stage
   bun run src/index.ts chat "message" [--url ...]                    send a message to the talent's egirl and perform the reply
@@ -40,6 +44,23 @@ async function main(argv: string[]): Promise<void> {
   const [cmd, ...args] = argv
   const base = flag(args, '--url') ?? 'http://127.0.0.1:3100'
   switch (cmd) {
+    case 'init': {
+      if (existsSync('stage.toml')) throw new Error('stage.toml already exists')
+      copyFileSync('stage.example.toml', 'stage.toml')
+      log('wrote stage.toml; edit models_dir and egirl_url, then: bun run voice && bun run serve')
+      return
+    }
+    case 'doctor': {
+      const checks = await doctor(loadConfig(flag(args, '--config')))
+      const G = '\x1b[38;5;114m'
+      const E = '\x1b[38;5;204m'
+      for (const c of checks)
+        console.log(`${c.ok ? `${G}ok ${R}` : `${E}!! ${R}`} ${c.name.padEnd(26)} ${c.detail}`)
+      const bad = checks.filter((c) => !c.ok).length
+      log(bad ? `${bad} problem(s)` : 'all good')
+      if (bad) process.exit(1)
+      return
+    }
     case 'serve': {
       const cfg = loadConfig(flag(args, '--config'))
       const talent = pickTalent(cfg, flag(args, '--talent'))

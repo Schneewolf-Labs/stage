@@ -24,7 +24,8 @@ egirl is untouched: Stage is a client of `POST /chat` and nothing else.
 
 ```bash
 bun install
-cp stage.example.toml stage.toml     # point models_dir and egirl_url at your machine
+bun run src/index.ts init            # stage.toml from the example; point models_dir and egirl_url at your machine
+bun run src/index.ts doctor          # models, voice service, every talent's egirl and tool lockdown
 
 # 1. voice service (creates its venv on first run; Kokoro on the GPU, RVC models in services/voice/models/<name>/)
 bun run voice
@@ -83,8 +84,12 @@ spectral tilt: wide for e/i, round for o/u). The page reads it at the audio cloc
 latency compensated, so the mouth is on the syllable rather than trailing a loudness meter.
 Clips without a track fall back to the live analyser.
 
-Planned and stubbed in the UI: live RVC passthrough of your own voice, clip recording, named
-scene presets, custom hotkeys.
+**Presets and hotkeys.** Save the current placement, motion, captions, background and screen as
+a named preset and apply it in one click (a chatting layout, a game layout). Bind console keys
+to a mood, a gesture, a canned line, a preset, stop, or mute; hotkeys keep working after a click
+on the preview. Both are saved to `stage.d`.
+
+Planned and stubbed in the UI: live RVC passthrough of your own voice, clip recording.
 
 ### Which workflow needs what
 
@@ -134,6 +139,8 @@ chat, cue tags stripped.
 | POST | `/image` | `{url, caption?, seconds?}` | show a picture on the screen area; `url: null` clears |
 | POST | `/twitch` | `{paused?, reply?}` | runtime chat toggles (400 without a twitch table) |
 | POST | `/transcribe[?send=1]` | WAV body | speech to text via the voice service; `send=1` runs it as a turn |
+| GET/POST | `/presets`, `/presets/apply`, `/presets/delete` | `{name}` | named layout snapshots |
+| POST | `/hotkeys`, `/hotkeys/fire` | `{hotkeys}` / `{key}` | console key bindings, saved; fire one by key |
 | GET | `/egirl` | | the talent's egirl `/info` and session context, for the Brain panel |
 | POST | `/egirl/thinking` | `{level}` | set the session's thinking level (off/low/medium/high) |
 | GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
@@ -169,7 +176,8 @@ read-only at `/models/`; a talent's `model` is a path under it to the `model3.js
 
 ```
 src/
-  index.ts      CLI: serve / say / chat / cue
+  index.ts      CLI: init / doctor / serve / say / chat / cue / stop / convert
+  doctor.ts     the pre-flight checks behind `stage doctor`
   config.ts     stage.toml -> typed config (no schema library; the shape is small)
   server.ts     Bun.serve: page, models, clips, HTTP API, WebSocket
   egirl.ts      POST /chat stream consumer (SSE frames)
@@ -187,6 +195,11 @@ web/            render page (index.html + stage.js), console (console.html/css/j
 services/voice/ Kokoro + RVC HTTP service
 test/           bun test
 ```
+
+## Running as services
+
+`services/systemd/` has user units like egirl's: `stage-voice.service` for the voice service and
+`stage@.service` for one stage per talent (`systemctl --user enable --now stage@springfield`).
 
 ## Development
 
