@@ -5,7 +5,7 @@ import type { EgirlEvent } from './types'
  * Send one message to the talent's egirl instance and yield its stream events.
  *
  * egirl streams SSE frames (`data: {...}\n\n`) with keepalive comments while the model thinks.
- * A dropped connection ends the generator without a `done` frame; the caller treats what it
+ * A dropped connection ends the generator without a `run_end` frame; the caller treats what it
  * has as the reply, the same way egirl's own web console does.
  */
 export async function* chat(talent: TalentConfig, message: string): AsyncGenerator<EgirlEvent> {
@@ -36,7 +36,7 @@ export async function* chat(talent: TalentConfig, message: string): AsyncGenerat
         continue
       }
       yield ev
-      if (ev.t === 'done' || ev.t === 'error') return
+      if (ev.t === 'run_end' || ev.t === 'error') return
     }
   }
 }
