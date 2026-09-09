@@ -62,13 +62,15 @@ const voice = Bun.serve({
     return new Response('nf', { status: 404 })
   },
 })
-const egirlCalls: { path: string; body: unknown }[] = []
+const egirlCalls: { method: string; path: string; body: unknown }[] = []
+/** Set by an interrupt; a 'slow' stream in flight ends with an aborted done frame. */
+let egirlAborted = false
 const egirl = Bun.serve({
   port: 0,
   async fetch(req) {
     const p = new URL(req.url).pathname
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : undefined
-    egirlCalls.push({ path: p, body })
+    egirlCalls.push({ method: req.method, path: p, body })
     if (p === '/info')
       return Response.json({
         name: 'fake',
@@ -76,9 +78,39 @@ const egirl = Bun.serve({
         tools: { exec: true, memory: true },
         thinking: 'low',
       })
-    if (p.endsWith('/context')) return Response.json({ used: 1200, limit: 32768 })
+    // The shapes below are egirl's own (src/api.ts), so a passing test means the console
+    // reads what a real instance sends.
+    if (p.endsWith('/context'))
+      return Response.json({
+        session_id: 'stage:test',
+        utilization: 0.37,
+        context_length: 32768,
+        system_prompt_tokens: 1800,
+        message_count: 12,
+        message_tokens: 10300,
+        has_summary: false,
+        summary_tokens: 0,
+        available: 20668,
+        thinking: 'high',
+      })
     if (p.endsWith('/thinking'))
       return Response.json({ ok: true, thinking: (body as { level: string }).level })
+    if (p.endsWith('/interrupt')) {
+      if ((body as { action?: string }).action !== 'abort')
+        return Response.json({ error: "action must be 'abort' or 'inject'" }, { status: 400 })
+      egirlAborted = true
+      return Response.json({ ok: true, delivered: true })
+    }
+    if (p.endsWith('/compact'))
+      return Response.json({ ok: true, messages_before: 12, messages_after: 4, dropped: 8 })
+    if (req.method === 'DELETE' && p.startsWith('/sessions/')) return Response.json({ ok: true })
+    if (p === '/asks')
+      return Response.json({
+        asks: [{ id: 'ask1', from: 'stage:test', question: 'Ship it?', asked_at: 1, kind: 'ask' }],
+      })
+    if (p === '/asks/ask1/reply') return Response.json({ ok: true, delivered: true })
+    if (p === '/asks/ask1/dismiss') return Response.json({ ok: true })
+    if (p.startsWith('/asks/')) return Response.json({ error: 'ask not found' }, { status: 404 })
     if (p === '/chat') {
       const enc = new TextEncoder()
       const msg = String((body as { message?: string })?.message ?? '')
@@ -90,18 +122,31 @@ const egirl = Bun.serve({
           ]
         : [
             { t: 'reasoning', v: 'hmm ' },
-            { t: 'tool', v: ['read_board'] },
-            { t: 'tool_done', v: 'read_board' },
+            { t: 'tool', v: ['read_board'], calls: [{ name: 'read_board', args: '{"id":1}' }] },
+            { t: 'tool_done', v: 'read_board', ok: true },
             { t: 'token', v: '[happy] One. ' },
             { t: 'token', v: 'Two. ' },
-            { t: 'done', content: '[happy] One. Two.' },
+            {
+              t: 'done',
+              content: '[happy] One. Two.',
+              output_tokens: 42,
+              turns: 2,
+              aborted: false,
+              awaiting: msg.includes('ask'),
+            },
           ]
+      const slow = msg.includes('slow')
+      if (slow) egirlAborted = false
       return new Response(
         new ReadableStream({
           async start(c) {
             for (const f of frames) {
+              if (slow && egirlAborted) {
+                c.enqueue(enc.encode(`data: ${JSON.stringify({ t: 'done', aborted: true })}\n\n`))
+                break
+              }
               c.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`))
-              await Bun.sleep(5)
+              await Bun.sleep(slow ? 150 : 5)
             }
             c.close()
           },
@@ -359,7 +404,8 @@ describe('brain', () => {
     const b = await get('/egirl')
     expect(b.ok).toBe(true)
     expect(b.info.tools.exec).toBe(true)
-    expect(b.context).toEqual({ used: 1200, limit: 32768 })
+    expect(b.context.utilization).toBe(0.37)
+    expect(b.context.thinking).toBe('high')
     expect(
       egirlCalls.some(
         (c) =>
@@ -376,6 +422,36 @@ describe('brain', () => {
   test('POST /egirl/thinking validates the level', async () => {
     expect((await post('/egirl/thinking', { level: 'max' })).status).toBe(400)
   })
+  test('POST /egirl/compact asks egirl to compact the talent session', async () => {
+    const r = await post('/egirl/compact').then((x) => x.json())
+    expect(r).toEqual({ ok: true, messages_before: 12, messages_after: 4, dropped: 8 })
+    expect(egirlCalls.some((c) => c.path === '/sessions/stage%3Atest/compact')).toBe(true)
+  })
+  test('POST /egirl/reset deletes the talent session on egirl', async () => {
+    const r = await post('/egirl/reset').then((x) => x.json())
+    expect(r.ok).toBe(true)
+    expect(
+      egirlCalls.some((c) => c.method === 'DELETE' && c.path === '/sessions/stage%3Atest'),
+    ).toBe(true)
+  })
+  test('GET /egirl/asks lists what the talent is waiting on a human for', async () => {
+    const r = await get('/egirl/asks')
+    expect(r.asks).toEqual([
+      { id: 'ask1', from: 'stage:test', question: 'Ship it?', asked_at: 1, kind: 'ask' },
+    ])
+  })
+  test('POST /egirl/asks/reply and /dismiss forward to egirl by id', async () => {
+    const r = await post('/egirl/asks/reply', { id: 'ask1', reply: 'yes' }).then((x) => x.json())
+    expect(r).toEqual({ ok: true, delivered: true })
+    const call = egirlCalls.find((c) => c.path === '/asks/ask1/reply')
+    expect(call?.body).toEqual({ reply: 'yes' })
+    expect((await post('/egirl/asks/dismiss', { id: 'ask1' })).status).toBe(200)
+    expect(egirlCalls.some((c) => c.path === '/asks/ask1/dismiss')).toBe(true)
+    expect((await post('/egirl/asks/reply', { id: 'ask1' })).status).toBe(400)
+    expect((await post('/egirl/asks/reply', { reply: 'yes' })).status).toBe(400)
+    expect((await post('/egirl/asks/dismiss', {})).status).toBe(400)
+    expect((await post('/egirl/asks/reply', { id: 'nope', reply: 'x' })).status).toBe(404)
+  })
 })
 
 describe('turns', () => {
@@ -385,16 +461,43 @@ describe('turns', () => {
     const r = await post('/chat', { message: 'go' }).then((x) => x.json())
     expect(r.reply).toBe('[happy] One. Two.')
     await con.waitFor((m) => m.type === 'turn' && m.phase === 'start' && m.message === 'go')
-    await con.waitFor((m) => m.type === 'tool_done')
+    const tool = await con.waitFor((m) => m.type === 'tool')
+    expect(tool.calls).toEqual([{ name: 'read_board', args: '{"id":1}' }])
+    const toolDone = await con.waitFor((m) => m.type === 'tool_done')
+    expect(toolDone.ok).toBe(true)
     const clips = con.got.filter((m) => m.type === 'clip')
     expect(clips.map((c) => c.text)).toEqual(['One.', 'Two.'])
-    await con.waitFor((m) => m.type === 'turn' && m.phase === 'done')
+    const done = await con.waitFor((m) => m.type === 'turn' && m.phase === 'done')
+    expect(done.tokens).toBe(42)
+    expect(done.turns).toBe(2)
+    expect(done.awaiting).toBe(false)
     expect(page.got.find((m) => m.type === 'mood' && m.mood === 'happy')).toBeDefined()
     expect(page.got.filter((m) => m.type === 'speak')).toHaveLength(2)
     // pages report playback; consoles hear it as playing/spoke
     const id = String(clips[0]?.id)
     expect(con.got.find((m) => m.type === 'playing' && m.id === id)).toBeDefined()
     expect(con.got.find((m) => m.type === 'spoke' && m.id === id)).toBeDefined()
+    page.close()
+    con.close()
+  })
+  test('a turn that parks on a question for a human says so', async () => {
+    const con = await client('console')
+    await post('/chat', { message: 'ask nick' })
+    const done = await con.waitFor((m) => m.type === 'turn' && m.phase === 'done')
+    expect(done.awaiting).toBe(true)
+    con.close()
+  })
+  test('POST /interrupt mid-turn aborts the egirl run the way egirl expects', async () => {
+    const page = await client()
+    const con = await client('console')
+    const turn = post('/chat', { message: 'slow one' })
+    await con.waitFor((m) => m.type === 'reasoning')
+    const r = await post('/interrupt').then((x) => x.json())
+    expect(r.aborted).toBe(true)
+    const call = egirlCalls.filter((c) => c.path.endsWith('/interrupt')).at(-1)
+    expect(call?.body).toEqual({ action: 'abort' })
+    await turn
+    expect(page.got.filter((m) => m.type === 'speak')).toHaveLength(0)
     page.close()
     con.close()
   })

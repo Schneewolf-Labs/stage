@@ -2,7 +2,7 @@
  * announced as a console so it also receives turn events. State logic lives in core.js
  * (tested); this file is wiring and DOM. Parameter ranges and live values are read straight
  * out of the preview iframe, which is the real render page with sound muted. */
-import { clampTransform, clipStats, downsample, encodeWav, readiness, riskyTools, turnReducer } from './core.js'
+import { clampTransform, clipStats, contextUse, downsample, encodeWav, readiness, riskyTools, turnReducer } from './core.js'
 
 const $ = (id) => document.getElementById(id)
 const app = document.querySelector('.app')
@@ -36,7 +36,7 @@ const bindRange = (id, valId, fmt, onChange) => { const r = $(id); r.addEventLis
 const setRange = (id, valId, v, fmt) => { $(id).value = v; $(valId).textContent = fmt(v) }
 
 /* ---------- panels ---------- */
-function showPanel(name) { app.dataset.panel = name; document.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.panel === name)); document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === name)); if (name === 'brain') loadBrain(); if (name === 'settings') renderReady() }
+function showPanel(name) { app.dataset.panel = name; document.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.panel === name)); document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === name)); if (name === 'brain') { loadBrain(); loadAsks() } if (name === 'settings') renderReady() }
 document.querySelectorAll('.rail-btn').forEach((b) => b.addEventListener('click', () => showPanel(b.dataset.panel)))
 showPanel('model')
 
@@ -279,11 +279,12 @@ async function loadBrain() {
   S.brain = b
   $('brUp').textContent = b.ok ? 'yes' : 'no'; $('brUp').style.color = b.ok ? 'var(--ok)' : 'var(--err)'
   $('brName').textContent = b.info?.name ?? '—'; $('brModel').textContent = b.info?.model ?? '—'; $('brModel').title = b.info?.model ?? ''
-  if (b.info?.thinking) $('thinkSel').value = b.info.thinking
-  const ctx = b.context || {}
-  const used = ctx.used ?? ctx.tokens ?? ctx.total ?? null, limit = ctx.limit ?? ctx.contextLength ?? ctx.max ?? b.info?.contextLength ?? null
-  $('brCtx').textContent = used != null && limit ? `${Math.round((used / limit) * 100)}%` : used != null ? String(used) : '—'
-  $('ctxFill').style.width = used != null && limit ? `${Math.min(100, (used / limit) * 100)}%` : '0'
+  const use = contextUse(b.context, b.info)
+  if (use.thinking) $('thinkSel').value = use.thinking
+  $('brCtx').textContent = use.pct != null ? `${use.pct}%` : '—'
+  $('brCtx').title = use.used != null ? `${use.used.toLocaleString()} of ${use.limit.toLocaleString()} tokens` : ''
+  $('ctxFill').style.width = use.pct != null ? `${Math.min(100, use.pct)}%` : '0'
+  $('brSession').textContent = b.context?.session_id ?? '—'
   const badges = $('toolBadges'); badges.innerHTML = ''
   const risky = new Set(riskyTools(b.info?.tools))
   for (const [k, v] of Object.entries(b.info?.tools || {})) { const on = v === true || (typeof v === 'string' && v !== 'off'); badges.appendChild(el('span', `badge-tool${on ? (risky.has(k) ? ' risky' : ' on') : ''}`, `${k}${on ? '' : ' off'}`)) }
@@ -294,6 +295,31 @@ async function loadBrain() {
 $('btnBrainRefresh').addEventListener('click', loadBrain)
 $('thinkSel').addEventListener('change', () => post('/egirl/thinking', { level: $('thinkSel').value }).then((r) => toast(r.error ? r.error : `Thinking: ${$('thinkSel').value}`)))
 $('btnAbortTurn').addEventListener('click', () => post('/interrupt').then((r) => toast(r.aborted ? 'Turn aborted' : 'Nothing to abort')))
+$('btnCompact').addEventListener('click', () => post('/egirl/compact').then((r) => { toast(r.error ? r.error : `Compacted: ${r.dropped} message${r.dropped === 1 ? '' : 's'} summarised`); loadBrain() }))
+// Two clicks: the first arms the button, the second forgets the session. No browser dialog.
+$('btnResetSession').addEventListener('click', () => {
+  const b = $('btnResetSession')
+  if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Really forget?'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'New session' }, 4000); return }
+  b.dataset.armed = ''; b.textContent = 'New session'
+  post('/egirl/reset').then((r) => { toast(r.error ? r.error : 'Session forgotten'); loadBrain() })
+})
+async function loadAsks() {
+  const r = await fetch('/egirl/asks').then((x) => x.json()).catch(() => ({ asks: [] }))
+  const box = $('asks'); box.innerHTML = ''
+  const asks = r.asks || []
+  document.querySelector('.rail-btn[data-panel=brain]').classList.toggle('attention', asks.length > 0)
+  if (!asks.length) { box.appendChild(el('div', 'empty', 'Nothing pending.')); return }
+  for (const a of asks) {
+    const card = el('div', 'ask')
+    card.append(el('div', 'from', `${a.from}${a.kind ? ` · ${a.kind}` : ''}`), el('div', 'q', a.question))
+    const row = el('div', 'row'); const input = el('input'); input.placeholder = 'Your answer'
+    const reply = el('button', 'btn primary', 'Reply'); const dismiss = el('button', 'btn', 'Dismiss')
+    const send = () => { if (!input.value.trim()) return; post('/egirl/asks/reply', { id: a.id, reply: input.value }).then((x) => { toast(x.error ? x.error : x.delivered ? 'Answered' : 'Answered, but she had stopped waiting'); loadAsks() }) }
+    reply.addEventListener('click', send); input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send() })
+    dismiss.addEventListener('click', () => post('/egirl/asks/dismiss', { id: a.id }).then(loadAsks))
+    row.append(input, reply, dismiss); card.appendChild(row); box.appendChild(card)
+  }
+}
 
 /* ---------- mic panel: push-to-talk -> WAV -> /transcribe ---------- */
 const mic = { ctx: null, stream: null, source: null, proc: null, analyser: null, chunks: [], recording: false, level: 0 }
@@ -358,12 +384,13 @@ function renderTurns() {
     const box = el('div', `turn${t.error ? ' error' : ''}`)
     const you = el('div', 'you'); you.append('you  ', el('b', null, t.message)); box.appendChild(you)
     if (t.reasoning) { const d = el('details', `think${t.done ? '' : ' live'}`); d.append(el('summary', null, `thinking · ${t.reasoning.length} chars`), el('pre', null, t.reasoning)); box.appendChild(d) }
-    if (t.tools.length) { const tools = el('div', 'tools'); for (const c of t.tools) tools.appendChild(el('span', `tool${c.done ? ' done' : ''}`, c.name)); box.appendChild(tools) }
+    if (t.tools.length) { const tools = el('div', 'tools'); for (const c of t.tools) { const chip = el('span', `tool${c.done ? ' done' : ''}${c.ok === false ? ' fail' : ''}`, c.name); if (c.args) chip.title = c.args; tools.appendChild(chip) } box.appendChild(tools) }
+    if (t.awaiting) box.appendChild(el('span', 'awaiting', 'waiting on you · see Brain'))
     const reply = el('div', 'reply')
     if (t.error) reply.textContent = t.error
     else { for (const s of t.sentences) reply.appendChild(el('span', `s ${s.status}`, `${s.text} `)); if (!t.done) reply.appendChild(el('span', 'cursor')) }
     box.appendChild(reply)
-    if (t.done) { const foot = el('div', 'foot'); foot.innerHTML = [`total <b>${ms(t.ms)}</b>`, t.firstAudio != null ? `first audio <b>${ms(t.firstAudio)}</b>` : '', t.reasoning ? `reasoning <b>${t.reasoning.length}</b> chars` : ''].filter(Boolean).join('<span style="opacity:.4"> · </span>'); box.appendChild(foot) }
+    if (t.done) { const foot = el('div', 'foot'); foot.innerHTML = [`total <b>${ms(t.ms)}</b>`, t.firstAudio != null ? `first audio <b>${ms(t.firstAudio)}</b>` : '', t.reasoning ? `reasoning <b>${t.reasoning.length}</b> chars` : '', t.tokens != null ? `<b>${t.tokens}</b> tokens` : '', t.turns != null && t.turns > 1 ? `<b>${t.turns}</b> turns` : ''].filter(Boolean).join('<span style="opacity:.4"> · </span>'); box.appendChild(foot) }
     tl.appendChild(box)
   }
 }
@@ -372,6 +399,7 @@ function onEvent(ev) {
   const before = S.turns.speaking
   S.turns = turnReducer(S.turns, ev)
   if (ev.type === 'turn' && ev.phase === 'start') { S.turnStart = performance.now(); S.ttfa = null; $('roTtfa').textContent = '…' }
+  if (ev.type === 'turn' && ev.phase === 'done' && ev.awaiting) { toast('She is waiting on you: open Brain'); loadAsks() }
   if (ev.type === 'clip' && S.ttfa == null) { S.ttfa = performance.now() - S.turnStart; $('roTtfa').textContent = ms(S.ttfa); const t = S.turns.turns.find((x) => !x.done); if (t) t.firstAudio = S.ttfa }
   if (S.turns.speaking !== before || ev.type === 'stop') setState(S.state)
   $('caption').textContent = S.turns.caption; $('caption').classList.toggle('on', !!S.turns.caption)
