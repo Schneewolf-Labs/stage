@@ -52,13 +52,15 @@ same cues), the talent's state, a level meter and latency readouts, and panels f
 voice (Kokoro voice, RVC model, pitch, speed, a test line, per-clip latency), the chat (each
 turn as a timeline: reasoning, tool calls, sentences lighting up as they are spoken, timing),
 Twitch (connection, queue, live lines) and setup (a go-live checklist, OBS URL, talents,
-shortcuts, health). Moods and gestures are one click or one key away; Esc stops the talent
+shortcuts, health). Tool chips in the timeline carry what the tool was called with and turn red
+when it failed; a turn that parks on a question for a human says so. Moods and gestures are one click or one key away; Esc stops the talent
 mid-sentence.
 
 Also in the console: **Scene** (drag the model in the preview and scroll to scale, saved per
 model; idle sway, blink rate, caption size, background colour), **Brain** (the talent's egirl
 instance: model, context use, which tools are enabled with the world-acting ones flagged,
-thinking level, abort), a **kill switch** that silences the talent instantly, a monitor toggle
+thinking level, abort, compact or forget the session, and answer the questions she parks on for
+a human), a **kill switch** that silences the talent instantly, a monitor toggle
 to hear the preview, and a server log drawer. Everything the console changes is saved to
 `stage.d/<talent>.toml` (gitignored) and wins over `stage.toml` on the next start; delete the
 file to reset.
@@ -143,6 +145,10 @@ chat, cue tags stripped.
 | POST | `/hotkeys`, `/hotkeys/fire` | `{hotkeys}` / `{key}` | console key bindings, saved; fire one by key |
 | GET | `/egirl` | | the talent's egirl `/info` and session context, for the Brain panel |
 | POST | `/egirl/thinking` | `{level}` | set the session's thinking level (off/low/medium/high) |
+| POST | `/egirl/compact` | | compact the session's history now (egirl keeps the last exchanges, summarises the rest) |
+| POST | `/egirl/reset` | | forget the session; the next turn starts with an empty history |
+| GET | `/egirl/asks` | | questions the instance has parked on for a human |
+| POST | `/egirl/asks/reply`, `/egirl/asks/dismiss` | `{id, reply}` / `{id}` | answer or drop one; egirl's reply is passed through |
 | GET | `/models.json` | | every model3.json under models_dir, with icons and expression counts |
 | GET | `/talent` | | the running talent's settings and the names of all configured talents |
 | GET | `/console` | | the operator console |

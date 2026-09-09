@@ -15,15 +15,19 @@ export function turnReducer(state, ev) {
       }
       const t = cur()
       if (!t) return s
-      Object.assign(t, { done: true, ms: ev.ms ?? null, error: ev.phase === 'error' ? (ev.message ?? 'error') : null })
+      Object.assign(t, { done: true, ms: ev.ms ?? null, error: ev.phase === 'error' ? (ev.message ?? 'error') : null, tokens: ev.tokens ?? null, turns: ev.turns ?? null, awaiting: ev.awaiting === true })
       return { ...s }
     }
     case 'reasoning': { const t = cur(); if (t) t.reasoning += ev.v; return { ...s } }
-    case 'tool': { const t = cur(); if (t) for (const name of ev.v) t.tools.push({ name, done: false }); return { ...s } }
+    case 'tool': {
+      const t = cur()
+      if (t) for (const [i, name] of ev.v.entries()) { const args = ev.calls?.[i]?.args; t.tools.push({ name, ...(args ? { args } : {}), done: false }) }
+      return { ...s }
+    }
     case 'tool_done': {
       const t = cur()
       const chip = t && [...t.tools].reverse().find((c) => c.name === ev.v && !c.done)
-      if (chip) chip.done = true
+      if (chip) { chip.done = true; chip.ok = ev.ok !== false }
       return { ...s }
     }
     case 'clip': {
@@ -68,6 +72,18 @@ export function clampTransform(t) {
 export function fitModel(screen, model, t) {
   const base = Math.min(screen.w / model.w, screen.h / model.h) * 0.95
   return { scale: base * t.scale, x: screen.w / 2 + (t.x * screen.w) / 2, y: screen.h / 2 + (t.y * screen.h) / 2 }
+}
+
+/**
+ * How full the talent's context is, from egirl's `/sessions/:id/context` (utilization as a
+ * 0-1 fraction, context_length, the session's own thinking override) with `/info` as the
+ * fallback for a session that has not spoken yet.
+ */
+export function contextUse(ctx, info) {
+  const limit = ctx?.context_length ?? info?.contextLength ?? null
+  const frac = typeof ctx?.utilization === 'number' ? ctx.utilization : null
+  const used = typeof ctx?.available === 'number' && limit ? limit - ctx.available : frac != null && limit ? Math.round(frac * limit) : null
+  return { used, limit, pct: frac != null ? Math.round(frac * 100) : null, thinking: ctx?.thinking ?? info?.thinking ?? null }
 }
 
 /** Enabled egirl tools that act on the world; a stage talent exposed to strangers should have none. */

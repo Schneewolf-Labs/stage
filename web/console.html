@@ -147,8 +147,12 @@
       <h3>Thinking</h3>
       <label class="field"><span>Level for this session</span><select id="thinkSel"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
       <div class="copyrow"><button class="btn danger" id="btnAbortTurn">Abort turn</button></div>
+      <h3>Waiting on you</h3>
+      <p class="help">Questions the talent parked on for a human. Answer here and her turn continues; dismiss and she gives up on it.</p>
+      <div class="asks" id="asks"><div class="empty">Nothing pending.</div></div>
       <h3>Session</h3>
-      <div class="copyrow"><code id="brSession">—</code></div>
+      <p class="help">A long stream fills the context. Compact keeps the last few exchanges and summarises the rest; a new session forgets everything.</p>
+      <div class="copyrow"><code id="brSession">—</code><button class="btn" id="btnCompact">Compact</button><button class="btn danger" id="btnResetSession">New session</button></div>
       <pre class="json" id="brainJson">…</pre>
     </section>
 

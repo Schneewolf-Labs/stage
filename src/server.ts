@@ -6,7 +6,18 @@ import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
 import { startDirector } from './director'
-import { brain, egirlUp, interrupt, isThinkingLevel, setThinking } from './egirl'
+import {
+  asks,
+  brain,
+  compact,
+  dismissAsk,
+  egirlUp,
+  interrupt,
+  isThinkingLevel,
+  replyAsk,
+  reset,
+  setThinking,
+} from './egirl'
 import { findExpressions, findModels } from './models'
 import { perform, type Stage, speak } from './performer'
 import {
@@ -45,6 +56,14 @@ type Role = 'page' | 'console'
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+/** Hand egirl's own answer (status and JSON body) to the console unchanged. */
+async function passThrough(r: Response): Promise<Response> {
+  return new Response(await r.text(), {
+    status: r.status,
     headers: { 'content-type': 'application/json' },
   })
 }
@@ -233,6 +252,8 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
   const server = Bun.serve<unknown>({
     hostname: cfg.server.host,
     port: cfg.server.port,
+    // An egirl turn can think for minutes; Bun's default idle timeout is 10 s.
+    idleTimeout: 255,
     async fetch(req, srv) {
       const url = new URL(req.url)
       const path = url.pathname
@@ -262,6 +283,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             twitch: !!talent.twitch,
           })
         if (path === '/egirl') return json(await brain(talent))
+        if (path === '/egirl/asks') return passThrough(await asks(talent))
         return serveUnder(WEB_DIR, path)
       }
       if (req.method === 'POST' && path === '/transcribe') {
@@ -480,13 +502,19 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
         if (path === '/egirl/thinking') {
           if (!isThinkingLevel(body.level))
             return json({ error: 'level must be off, low, medium or high' }, 400)
-          const r = await setThinking(talent, body.level).catch(
-            (e: Error) => new Response(e.message, { status: 502 }),
-          )
-          return new Response(await r.text(), {
-            status: r.status,
-            headers: { 'content-type': 'application/json' },
-          })
+          return passThrough(await setThinking(talent, body.level))
+        }
+        if (path === '/egirl/compact') return passThrough(await compact(talent))
+        if (path === '/egirl/reset') return passThrough(await reset(talent))
+        if (path === '/egirl/asks/reply') {
+          if (typeof body.id !== 'string' || !body.id) return json({ error: 'id required' }, 400)
+          if (typeof body.reply !== 'string' || !body.reply.trim())
+            return json({ error: 'reply required' }, 400)
+          return passThrough(await replyAsk(talent, body.id, body.reply))
+        }
+        if (path === '/egirl/asks/dismiss') {
+          if (typeof body.id !== 'string' || !body.id) return json({ error: 'id required' }, 400)
+          return passThrough(await dismissAsk(talent, body.id))
         }
         if (path === '/voice') {
           // Live voice settings; the next sentence uses them. Not persisted to stage.toml.

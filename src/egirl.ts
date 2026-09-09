@@ -43,16 +43,64 @@ export async function* chat(talent: TalentConfig, message: string): AsyncGenerat
 
 /** Ask egirl to abort the talent's in-flight turn. Best effort: an idle session is not an error. */
 export async function interrupt(talent: TalentConfig): Promise<boolean> {
-  const headers: Record<string, string> = {}
-  if (talent.egirl_token) headers.authorization = `Bearer ${talent.egirl_token}`
-  const res = await fetch(
-    `${talent.egirl_url}/sessions/${encodeURIComponent(talent.session)}/interrupt`,
-    {
-      method: 'POST',
-      headers,
+  const res = await session(talent, 'interrupt', { action: 'abort' }).catch(() => undefined)
+  if (!res?.ok) return false
+  const r = (await res.json().catch(() => ({}))) as { delivered?: boolean }
+  return r.delivered === true
+}
+
+/**
+ * One request to egirl, returned as-is so the caller can pass status and body through. A
+ * network failure becomes a 502 with the error as its body.
+ */
+export async function egirlFetch(
+  talent: TalentConfig,
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  return fetch(`${talent.egirl_url}${path}`, {
+    method,
+    headers: {
+      ...authHeaders(talent),
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-  ).catch(() => undefined)
-  return res?.ok ?? false
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(30_000),
+  }).catch((e: Error) => new Response(JSON.stringify({ error: e.message }), { status: 502 }))
+}
+
+/** POST to one of the talent session's sub-endpoints (interrupt, compact, thinking). */
+function session(talent: TalentConfig, action: string, body: unknown): Promise<Response> {
+  return egirlFetch(
+    talent,
+    'POST',
+    `/sessions/${encodeURIComponent(talent.session)}/${action}`,
+    body,
+  )
+}
+
+/** Compact the session's history now; egirl answers with before/after message counts. */
+export function compact(talent: TalentConfig): Promise<Response> {
+  return session(talent, 'compact', {})
+}
+
+/** Forget the session: egirl starts the next turn with an empty history. */
+export function reset(talent: TalentConfig): Promise<Response> {
+  return egirlFetch(talent, 'DELETE', `/sessions/${encodeURIComponent(talent.session)}`)
+}
+
+/** Questions the instance has parked on for a human, from every session. */
+export function asks(talent: TalentConfig): Promise<Response> {
+  return egirlFetch(talent, 'GET', '/asks')
+}
+
+export function replyAsk(talent: TalentConfig, id: string, reply: string): Promise<Response> {
+  return egirlFetch(talent, 'POST', `/asks/${encodeURIComponent(id)}/reply`, { reply })
+}
+
+export function dismissAsk(talent: TalentConfig, id: string): Promise<Response> {
+  return egirlFetch(talent, 'POST', `/asks/${encodeURIComponent(id)}/dismiss`, {})
 }
 
 const THINKING = ['off', 'low', 'medium', 'high'] as const
@@ -89,12 +137,8 @@ export async function brain(
 }
 
 /** Set the session's thinking level through egirl; returns egirl's own reply. */
-export async function setThinking(talent: TalentConfig, level: ThinkingLevel): Promise<Response> {
-  return fetch(`${talent.egirl_url}/sessions/${encodeURIComponent(talent.session)}/thinking`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...authHeaders(talent) },
-    body: JSON.stringify({ level }),
-  })
+export function setThinking(talent: TalentConfig, level: ThinkingLevel): Promise<Response> {
+  return session(talent, 'thinking', { level })
 }
 
 /** Reachability for /health: cheap and bounded. */

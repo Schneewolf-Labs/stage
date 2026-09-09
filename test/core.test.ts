@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   clampTransform,
   clipStats,
+  contextUse,
   downsample,
   encodeWav,
   fitModel,
@@ -33,7 +34,7 @@ describe('turnReducer', () => {
     const t = s.turns[0]
     expect(t.message).toBe('hi')
     expect(t.reasoning).toBe('let me think')
-    expect(t.tools).toEqual([{ name: 'read_board', done: true }])
+    expect(t.tools).toEqual([{ name: 'read_board', done: true, ok: true }])
     expect(t.sentences).toEqual([{ id: 'c1', text: 'Hello.', status: 'done' }])
     expect(t.ms).toBe(1500)
     expect(t.done).toBe(true)
@@ -64,7 +65,7 @@ describe('turnReducer', () => {
     ])
     expect(s.turns[0].tools).toEqual([
       { name: 'x', done: false },
-      { name: 'x', done: true },
+      { name: 'x', done: true, ok: true },
     ])
   })
 
@@ -88,6 +89,58 @@ describe('turnReducer', () => {
     s = turnReducer(s, { type: 'stop' })
     expect(s.speaking).toBe(false)
     expect(s.caption).toBe('')
+  })
+})
+
+describe('turnReducer tool detail', () => {
+  const run = (events: object[]) =>
+    events.reduce((s, e) => turnReducer(s, e), turnReducer(undefined, { type: 'init' }))
+
+  test('keeps what a tool was called with, whether it failed, and the turn cost', () => {
+    const s = run([
+      { type: 'turn', phase: 'start', message: 'hi' },
+      {
+        type: 'tool',
+        v: ['execute_command'],
+        calls: [{ name: 'execute_command', args: '{"command":"ls"}' }],
+      },
+      { type: 'tool_done', v: 'execute_command', ok: false },
+      { type: 'tool', v: ['read_file'] },
+      { type: 'tool_done', v: 'read_file' },
+      { type: 'turn', phase: 'done', reply: '', ms: 10, tokens: 42, turns: 2, awaiting: true },
+    ])
+    const t = s.turns[0]
+    expect(t.tools).toEqual([
+      { name: 'execute_command', args: '{"command":"ls"}', done: true, ok: false },
+      { name: 'read_file', done: true, ok: true },
+    ])
+    expect(t.tokens).toBe(42)
+    expect(t.turns).toBe(2)
+    expect(t.awaiting).toBe(true)
+  })
+})
+
+describe('contextUse', () => {
+  test("reads egirl's /sessions/:id/context shape", () => {
+    const u = contextUse(
+      { utilization: 0.37, context_length: 32768, available: 20668, thinking: 'high' },
+      { thinking: 'low', contextLength: 32768 },
+    )
+    expect(u).toEqual({ used: 12100, limit: 32768, pct: 37, thinking: 'high' })
+  })
+  test('falls back to the instance defaults when the session has no context yet', () => {
+    expect(contextUse(null, { thinking: 'low', contextLength: 8192 })).toEqual({
+      used: null,
+      limit: 8192,
+      pct: null,
+      thinking: 'low',
+    })
+    expect(contextUse(undefined, undefined)).toEqual({
+      used: null,
+      limit: null,
+      pct: null,
+      thinking: null,
+    })
   })
 })
 

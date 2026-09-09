@@ -75,6 +75,7 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
   stage.event({ type: 'turn', phase: 'start', message })
   let reply = ''
   let thinking = false
+  let cost: { tokens?: number; turns?: number; awaiting?: boolean } = {}
   let speaking = Promise.resolve()
   const say = (chunk: string) => {
     // Chain rather than await inline so the stream keeps draining while a clip synthesizes.
@@ -89,10 +90,10 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
           stage.cue({ type: 'state', state: 'thinking' })
         }
       } else if (ev.t === 'tool') {
-        stage.event({ type: 'tool', v: ev.v })
+        stage.event({ type: 'tool', v: ev.v, ...(ev.calls ? { calls: ev.calls } : {}) })
         stage.cue({ type: 'state', state: 'working', detail: ev.v.join(', ') })
       } else if (ev.t === 'tool_done') {
-        stage.event({ type: 'tool_done', v: ev.v })
+        stage.event({ type: 'tool_done', v: ev.v, ...(ev.ok === undefined ? {} : { ok: ev.ok }) })
         stage.cue({ type: 'state', state: 'thinking', detail: `${ev.v} done` })
       } else if (ev.t === 'token') {
         stage.event({ type: 'token', v: ev.v })
@@ -100,6 +101,7 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
         reply += ev.v
         for (const s of chunker.push(ev.v)) say(s)
       } else if (ev.t === 'done') {
+        cost = { tokens: ev.output_tokens, turns: ev.turns, awaiting: ev.awaiting }
         if (ev.content && !reply) {
           reply = ev.content
           for (const s of chunker.push(ev.content)) say(s)
@@ -123,6 +125,12 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
     stage.cue({ type: 'state', state: 'idle' })
   }
   const text = reply.trim()
-  stage.event({ type: 'turn', phase: 'done', reply: text, ms: Math.round(performance.now() - t0) })
+  stage.event({
+    type: 'turn',
+    phase: 'done',
+    reply: text,
+    ms: Math.round(performance.now() - t0),
+    ...cost,
+  })
   return text
 }

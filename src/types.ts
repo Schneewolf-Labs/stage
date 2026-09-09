@@ -6,10 +6,24 @@ export type EgirlEvent =
   | { t: 'queued'; position: number }
   | { t: 'reasoning'; v: string }
   | { t: 'token'; v: string }
-  | { t: 'tool'; v: string[] }
-  | { t: 'tool_done'; v: string }
-  | { t: 'done'; content?: string; aborted?: boolean }
+  /** `calls` carries what each tool was asked to do, one line each; older egirls send only `v`. */
+  | { t: 'tool'; v: string[]; calls?: ToolCallSummary[] }
+  | { t: 'tool_done'; v: string; ok?: boolean }
+  | {
+      t: 'done'
+      content?: string
+      aborted?: boolean
+      output_tokens?: number
+      turns?: number
+      /** The run parked on a question for a human (egirl's /asks); the reply is not final. */
+      awaiting?: boolean
+    }
   | { t: 'error'; message?: string }
+
+export interface ToolCallSummary {
+  name: string
+  args: string
+}
 
 /** What the talent is doing, for body language between lines. */
 export type StageState = 'idle' | 'thinking' | 'working'
@@ -63,11 +77,14 @@ export type ConsoleEvent =
       message?: string
       reply?: string
       ms?: number
+      tokens?: number
+      turns?: number
+      awaiting?: boolean
     }
   | { type: 'reasoning'; v: string }
   | { type: 'token'; v: string }
-  | { type: 'tool'; v: string[] }
-  | { type: 'tool_done'; v: string }
+  | { type: 'tool'; v: string[]; calls?: ToolCallSummary[] }
+  | { type: 'tool_done'; v: string; ok?: boolean }
   | { type: 'clip'; id: string; text: string; seconds: number; genMs: number }
   /** A page started / finished playing a clip. With several pages, the first report wins. */
   | { type: 'playing'; id: string }

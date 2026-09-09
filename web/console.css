@@ -33,6 +33,7 @@ code { font-family: var(--mono); font-size: 12px }
 .rail-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round }
 .rail-btn span { font-size: 10.5px; letter-spacing: .02em }
 .rail-btn:hover { color: var(--text); background: rgba(175, 95, 215, .1) }
+.rail-btn { position: relative } .rail-btn.attention::after { content: ""; position: absolute; top: 6px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 6px var(--warn) }
 .rail-btn.active { color: #fff; background: linear-gradient(180deg, rgba(175, 95, 215, .28), rgba(255, 95, 175, .18)); box-shadow: inset 0 0 0 1px var(--line-strong) }
 .rail-spacer { flex: 1 }
 .rail-health { display: flex; gap: 4px } .rail-health .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim) }
@@ -152,6 +153,13 @@ code { font-family: var(--mono); font-size: 12px }
 .tool { font: 11px var(--mono); padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(255, 215, 95, .35); color: var(--warn); display: flex; align-items: center; gap: 6px }
 .tool::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--warn); border-right-color: transparent; animation: spin .8s linear infinite }
 .tool.done { color: var(--ok); border-color: rgba(135, 215, 135, .35) } .tool.done::before { animation: none; border: 0; background: var(--ok); width: 6px; height: 6px }
+.tool.done.fail { color: var(--err); border-color: rgba(255, 95, 135, .45) } .tool.done.fail::before { background: var(--err) }
+.tool[title] { cursor: help }
+.turn .awaiting { font: 11px var(--mono); padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(255, 215, 95, .45); color: var(--warn); margin: 10px 12px 0; display: inline-block }
+.asks { display: flex; flex-direction: column; gap: 8px }
+.ask { padding: 10px 12px; border-radius: var(--r-sm); background: var(--bg2); border: 1px solid rgba(255, 215, 95, .35); display: flex; flex-direction: column; gap: 8px }
+.ask .q { font-size: 13px; white-space: pre-wrap } .ask .from { font: 11px var(--mono); color: var(--dim) }
+.ask .row { display: flex; gap: 8px } .ask .row input { flex: 1; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg); color: var(--text); outline: none }
 .reply { padding: 12px 14px 8px; font-size: 14px; line-height: 1.55; min-height: 20px }
 .reply .s { transition: color .2s; border-radius: 4px; padding: 0 2px }
 .reply .s.queued { color: var(--muted) } .reply .s.now { color: #fff; background: rgba(255, 95, 175, .18) } .reply .s.done { color: var(--text) }
