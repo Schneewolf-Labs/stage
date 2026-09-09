@@ -114,35 +114,58 @@ const egirl = Bun.serve({
     if (p === '/chat') {
       const enc = new TextEncoder()
       const msg = String((body as { message?: string })?.message ?? '')
+      // Frames are egirl main's session-bus shapes (src/agent/session-events.ts in egirl).
+      const end = (content: string, aborted = false) => ({
+        t: 'run_end',
+        v: {
+          content,
+          input_tokens: 10,
+          output_tokens: 42,
+          turns: 2,
+          duration_ms: 5,
+          aborted,
+          awaiting: msg.includes('ask'),
+        },
+      })
       const frames = msg.includes('picture')
         ? [
             { t: 'token', v: 'Here. ![a cat](http://img/cat.png) ' },
             { t: 'token', v: 'Like it? ' },
-            { t: 'done', content: 'Here. ![a cat](http://img/cat.png) Like it?' },
+            end('Here. ![a cat](http://img/cat.png) Like it?'),
           ]
         : [
+            { t: 'queued', v: 1 },
+            { t: 'run_start', v: { message: msg } },
             { t: 'reasoning', v: 'hmm ' },
-            { t: 'tool', v: ['read_board'], calls: [{ name: 'read_board', args: '{"id":1}' }] },
-            { t: 'tool_done', v: 'read_board', ok: true },
+            {
+              t: 'tool',
+              v: [
+                { name: 'read_board', args: '{"id":1}' },
+                { name: 'write_file', args: `{"content":"${'x'.repeat(500)}"}` },
+              ],
+            },
+            {
+              t: 'tool_done',
+              v: { name: 'read_board', success: true, args: '{"id":1}', output: 'ok' },
+            },
+            {
+              t: 'tool_done',
+              v: { name: 'write_file', success: false, args: '{}', output: 'EACCES' },
+            },
+            { t: 'turn', v: { model: 'tiny', content: '', thinking: '', tool_calls: '' } },
             { t: 'token', v: '[happy] One. ' },
             { t: 'token', v: 'Two. ' },
-            {
-              t: 'done',
-              content: '[happy] One. Two.',
-              output_tokens: 42,
-              turns: 2,
-              aborted: false,
-              awaiting: msg.includes('ask'),
-            },
+            end('[happy] One. Two.'),
           ]
       const slow = msg.includes('slow')
       if (slow) egirlAborted = false
       return new Response(
         new ReadableStream({
           async start(c) {
+            c.enqueue(enc.encode(': open\n\n'))
             for (const f of frames) {
               if (slow && egirlAborted) {
-                c.enqueue(enc.encode(`data: ${JSON.stringify({ t: 'done', aborted: true })}\n\n`))
+                c.enqueue(enc.encode(`data: ${JSON.stringify(end('', true))}\n\n`))
                 break
               }
               c.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`))
@@ -462,9 +485,16 @@ describe('turns', () => {
     expect(r.reply).toBe('[happy] One. Two.')
     await con.waitFor((m) => m.type === 'turn' && m.phase === 'start' && m.message === 'go')
     const tool = await con.waitFor((m) => m.type === 'tool')
-    expect(tool.calls).toEqual([{ name: 'read_board', args: '{"id":1}' }])
+    expect(tool.v).toEqual(['read_board', 'write_file'])
+    const calls = tool.calls as { name: string; args: string }[]
+    expect(calls[0]).toEqual({ name: 'read_board', args: '{"id":1}' })
+    // Arguments are for a chip tooltip, not a payload: long ones are cut.
+    expect(calls[1]?.args.length).toBeLessThanOrEqual(240)
+    expect(calls[1]?.args.endsWith('…')).toBe(true)
     const toolDone = await con.waitFor((m) => m.type === 'tool_done')
-    expect(toolDone.ok).toBe(true)
+    expect(toolDone).toMatchObject({ v: 'read_board', ok: true })
+    const failed = await con.waitFor((m) => m.type === 'tool_done')
+    expect(failed).toMatchObject({ v: 'write_file', ok: false })
     const clips = con.got.filter((m) => m.type === 'clip')
     expect(clips.map((c) => c.text)).toEqual(['One.', 'Two.'])
     const done = await con.waitFor((m) => m.type === 'turn' && m.phase === 'done')
@@ -496,7 +526,7 @@ describe('turns', () => {
     expect(r.aborted).toBe(true)
     const call = egirlCalls.filter((c) => c.path.endsWith('/interrupt')).at(-1)
     expect(call?.body).toEqual({ action: 'abort' })
-    await turn
+    expect((await turn.then((x) => x.json())).reply).toBe('')
     expect(page.got.filter((m) => m.type === 'speak')).toHaveLength(0)
     page.close()
     con.close()

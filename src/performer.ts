@@ -63,6 +63,12 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   )
 }
 
+/** egirl sends a tool's full arguments; the console shows them in a chip tooltip. */
+const ARGS_MAX = 240
+function trimArgs(args: string): string {
+  return args.length > ARGS_MAX ? `${args.slice(0, ARGS_MAX - 1)}…` : args
+}
+
 /**
  * Run one egirl turn on stage. Reasoning tokens put the talent in a thinking pose, tool calls in
  * a working pose with the tool name as a caption, and answer tokens are chunked into sentences
@@ -90,24 +96,29 @@ export async function perform(opts: PerformOptions, message: string): Promise<st
           stage.cue({ type: 'state', state: 'thinking' })
         }
       } else if (ev.t === 'tool') {
-        stage.event({ type: 'tool', v: ev.v, ...(ev.calls ? { calls: ev.calls } : {}) })
-        stage.cue({ type: 'state', state: 'working', detail: ev.v.join(', ') })
+        const names = ev.v.map((c) => c.name)
+        stage.event({
+          type: 'tool',
+          v: names,
+          calls: ev.v.map((c) => ({ name: c.name, args: trimArgs(c.args) })),
+        })
+        stage.cue({ type: 'state', state: 'working', detail: names.join(', ') })
       } else if (ev.t === 'tool_done') {
-        stage.event({ type: 'tool_done', v: ev.v, ...(ev.ok === undefined ? {} : { ok: ev.ok }) })
-        stage.cue({ type: 'state', state: 'thinking', detail: `${ev.v} done` })
+        stage.event({ type: 'tool_done', v: ev.v.name, ok: ev.v.success })
+        stage.cue({ type: 'state', state: 'thinking', detail: `${ev.v.name} done` })
       } else if (ev.t === 'token') {
         stage.event({ type: 'token', v: ev.v })
         if (!reply) stage.cue({ type: 'state', state: 'idle' })
         reply += ev.v
         for (const s of chunker.push(ev.v)) say(s)
-      } else if (ev.t === 'done') {
-        cost = { tokens: ev.output_tokens, turns: ev.turns, awaiting: ev.awaiting }
-        if (ev.content && !reply) {
-          reply = ev.content
-          for (const s of chunker.push(ev.content)) say(s)
+      } else if (ev.t === 'run_end') {
+        cost = { tokens: ev.v.output_tokens, turns: ev.v.turns, awaiting: ev.v.awaiting }
+        if (ev.v.content && !reply) {
+          reply = ev.v.content
+          for (const s of chunker.push(ev.v.content)) say(s)
         }
       } else if (ev.t === 'error') {
-        throw new Error(ev.message ?? 'egirl stream error')
+        throw new Error(ev.v || 'egirl stream error')
       }
     }
   } catch (e) {

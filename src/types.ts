@@ -1,24 +1,37 @@
 import type { Director, Hotkey, Scene, Transform } from './persist'
 import type { MouthTrack } from './voice'
 
-/** Events egirl's `POST /chat` (stream: true) emits as SSE `data:` frames. */
+/**
+ * Frames egirl's `POST /chat` (stream: true) relays from its session bus, as SSE `data:` lines.
+ * The shape is egirl's `SessionEvent` (src/agent/session-events.ts there) plus the request's
+ * own `queued`; the wire shape is `{t, v}` throughout. Stage reads what it performs and
+ * ignores the rest (`turn` is egirl's journal record of one inference).
+ */
 export type EgirlEvent =
-  | { t: 'queued'; position: number }
+  | { t: 'queued'; v: number }
+  | { t: 'run_start'; v: { message: string } }
+  | { t: 'inject'; v: string }
   | { t: 'reasoning'; v: string }
   | { t: 'token'; v: string }
-  /** `calls` carries what each tool was asked to do, one line each; older egirls send only `v`. */
-  | { t: 'tool'; v: string[]; calls?: ToolCallSummary[] }
-  | { t: 'tool_done'; v: string; ok?: boolean }
+  /** Tool calls about to execute, with their arguments as JSON. */
+  | { t: 'tool'; v: ToolCallSummary[] }
+  | { t: 'tool_done'; v: { name: string; success: boolean; args: string; output: string } }
+  | { t: 'turn'; v: unknown }
   | {
-      t: 'done'
-      content?: string
-      aborted?: boolean
-      output_tokens?: number
-      turns?: number
-      /** The run parked on a question for a human (egirl's /asks); the reply is not final. */
-      awaiting?: boolean
+      t: 'run_end'
+      v: {
+        content: string
+        input_tokens: number
+        output_tokens: number
+        turns: number
+        duration_ms: number
+        aborted: boolean
+        /** The run parked on a question for a human (egirl's /asks); the reply is not final. */
+        awaiting: boolean
+      }
     }
-  | { t: 'error'; message?: string }
+  /** The run threw; always the last frame when it does. */
+  | { t: 'error'; v: string }
 
 export interface ToolCallSummary {
   name: string

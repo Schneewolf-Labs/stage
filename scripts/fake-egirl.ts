@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
  * A stand-in for egirl's `POST /chat` stream, for developing Stage without a model running.
- * Emits reasoning, a tool call, then a tagged reply token by token.
+ * Emits reasoning, a tool call, then a tagged reply token by token, in the frame shapes of
+ * egirl's session bus (src/agent/session-events.ts there).
  *
  *     bun run scripts/fake-egirl.ts [--port 3999]
  */
@@ -43,17 +44,23 @@ Bun.serve({
     const stream = new ReadableStream<Uint8Array>({
       async start(c) {
         const send = (o: unknown) => c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`))
+        c.enqueue(enc.encode(': open\n\n'))
+        send({ t: 'run_start', v: { message } })
         for (const w of 'Let me check the board state first.'.split(' ')) {
           send({ t: 'reasoning', v: `${w} ` })
           await sleep(120)
         }
-        send({ t: 'tool', v: ['read_board'], calls: [{ name: 'read_board', args: '{"round":3}' }] })
+        send({ t: 'tool', v: [{ name: 'read_board', args: '{"round":3}' }] })
         await sleep(1200)
-        send({ t: 'tool_done', v: 'read_board', ok: true })
+        send({ t: 'tool_done', v: { name: 'read_board', success: true, args: '{"round":3}', output: 'tier 3, 2 stars' } })
         await sleep(300)
+        const end = (content: string, awaiting: boolean) => ({
+          t: 'run_end',
+          v: { content, input_tokens: 800, output_tokens: 96, turns: 2, duration_ms: 4000, aborted: false, awaiting },
+        })
         if (message.includes('ask')) {
           asks.push({ id: `ask-${Date.now()}`, question: 'Chat wants me to play the risky line. Should I?', at: Date.now() })
-          send({ t: 'done', content: '', output_tokens: 12, turns: 1, aborted: false, awaiting: true })
+          send(end('', true))
           c.close()
           return
         }
@@ -61,7 +68,7 @@ Bun.serve({
           send({ t: 'token', v: tok })
           await sleep(60)
         }
-        send({ t: 'done', content: REPLY, output_tokens: 96, turns: 2, aborted: false, awaiting: false })
+        send(end(REPLY, false))
         c.close()
       },
     })
