@@ -4,6 +4,7 @@ import { riskyTools } from '../web/core.js'
 import type { StageConfig } from './config'
 import { brain, egirlUp } from './egirl'
 import { voiceHealth } from './voice'
+import { resolveTalent } from './wald'
 
 export interface Check {
   name: string
@@ -48,11 +49,17 @@ export async function doctor(cfg: StageConfig): Promise<Check[]> {
             ? t.rvc
             : `${t.rvc} not in services/voice/models`,
       })
-    const up = await egirlUp(t)
+    // A Wald-named talent has no address until Wald supplies one; say which step failed.
+    const unresolved = await resolveTalent(cfg, t).then(
+      () => '',
+      (e: Error) => e.message,
+    )
+    const up = !unresolved && (await egirlUp(t))
+    const via = t.egirl ? ` (wald: ${t.egirl})` : ''
     out.push({
       name: `talent ${t.name}: egirl`,
       ok: up,
-      detail: up ? t.egirl_url : `${t.egirl_url} unreachable`,
+      detail: unresolved || (up ? `${t.egirl_url}${via}` : `${t.egirl_url}${via} unreachable`),
     })
     const b = up ? await brain(t) : undefined
     const info = b?.ok ? (b.info as { tools?: Record<string, unknown> }) : undefined

@@ -24,7 +24,7 @@ egirl is untouched: Stage is a client of `POST /chat` and nothing else.
 
 ```bash
 bun install
-bun run src/index.ts init            # stage.toml from the example; point models_dir and egirl_url at your machine
+bun run src/index.ts init            # stage.toml from the example; point models_dir and egirl_url (or egirl + [wald]) at your machine
 bun run src/index.ts doctor          # models, voice service, every talent's egirl and tool lockdown
 
 # 1. voice service (creates its venv on first run; Kokoro on the GPU, RVC models in services/voice/models/<name>/)
@@ -43,6 +43,16 @@ bun run src/index.ts convert take1.wav take1-egirl.wav --rvc egirl --pitch 12   
 In OBS add a **Browser** source with the stage URL, 1920x1080, and it renders with a transparent
 background. Any normal browser tab needs one click on the page before audio plays (autoplay
 policy); OBS does not.
+
+Instead of pinning `egirl_url`, a talent can name its egirl instance and let a
+[Wald](https://github.com/Schneewolf-Labs/Wald) registry supply the address: set
+`[wald] url = "http://wald.internal:8000"` and `egirl = "kira"` on the talent (the slug the
+instance registered under). `serve` asks Wald (`GET /agents/{slug}`) at startup and accepts only
+an agent with `protocol = "egirl-peer/1"`, `status = "active"` and an `endpoint_url`; otherwise it
+refuses to start and says which. If that egirl later stops answering, the next failed turn asks
+Wald again, so an instance that moved is picked up without a restart. A pinned `egirl_url` wins
+over `egirl`, and `doctor` shows the resolved URL or why resolution failed. Tokens still come
+from `egirl_token`: Wald stores where an instance is, not how to authenticate to it.
 
 ## Console
 
