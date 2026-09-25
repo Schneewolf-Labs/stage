@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { sceneFrom } from '../src/persist'
 import { pcm16, ReelBuilder, wavBytes } from '../src/reel'
-import { buildReel } from '../src/render'
+import { buildReel, renderScene } from '../src/render'
 
 /** A mono PCM16 WAV of `n` samples, each sample = `v`. */
 function wav(n: number, v = 1000, rate = 24000): ArrayBuffer {
@@ -94,5 +95,21 @@ describe('ReelBuilder', () => {
     const r = new ReelBuilder()
     r.clip(wav(10), 'a')
     expect(() => r.clip(wav(10, 1, 16000), 'b')).toThrow(/rate/)
+  })
+})
+
+describe('renderScene', () => {
+  const scene = sceneFrom({})
+  test('captions scale with the render width unless a size is given', () => {
+    // The live 22 px is sized for a 1920x1080 OBS canvas; a 1080-wide short needs bigger text.
+    expect(renderScene(scene, { width: 1080 }).captions.size).toBe(54)
+    expect(renderScene(scene, { width: 1920 }).captions.size).toBe(96)
+    expect(renderScene(scene, { width: 1080, captionSize: 40 }).captions.size).toBe(40)
+  })
+  test('--bg overrides the background colour and leaves the rest', () => {
+    const s = renderScene(scene, { width: 1080, bg: '#123456' })
+    expect(s.background.color).toBe('#123456')
+    expect(s.motion).toEqual(scene.motion)
+    expect(scene.captions.size).toBe(22) // the input is not mutated
   })
 })

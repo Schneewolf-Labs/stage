@@ -18,7 +18,7 @@ const HELP = `stage -- VTuber harness for egirl agents
   bun run src/index.ts convert in.wav out.wav [--rvc egirl] [--pitch 12] [--config stage.toml]
                                                                      your recording, in the RVC voice (voiceovers)
   bun run src/index.ts render script.txt out.mp4 [--talent NAME] [--width 1080] [--height 1920] [--fps 30]
-                        [--bg '#hex'] [--gap-ms 250] [--chrome PATH] [--config stage.toml]
+                        [--bg '#hex'] [--caption-size PX] [--gap-ms 250] [--chrome PATH] [--config stage.toml]
                                                                      the talent reads a script (one line per line,
                                                                      cue tags honoured) into an mp4; needs Chrome + ffmpeg
 
@@ -123,6 +123,7 @@ async function main(argv: string[]): Promise<void> {
         fps: n('--fps', 30),
         bg: flag(args, '--bg'),
         gapMs: n('--gap-ms', 250),
+        ...(flag(args, '--caption-size') ? { captionSize: n('--caption-size', 0) } : {}),
         chrome: flag(args, '--chrome') ?? process.env.CHROME ?? 'google-chrome',
         log,
       })

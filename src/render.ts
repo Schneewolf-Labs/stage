@@ -7,7 +7,7 @@ import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
 import { findExpressions } from './models'
 import { type Stage, speak } from './performer'
-import { readOverrides, sceneFrom } from './persist'
+import { readOverrides, type Scene, sceneFrom } from './persist'
 import { type Reel, ReelBuilder } from './reel'
 import { serveUnder, WEB_DIR } from './server'
 
@@ -22,6 +22,8 @@ export interface RenderOptions {
   /** Background colour; without one the page paints its brand background. */
   bg?: string
   gapMs: number
+  /** Caption px; defaults to 5% of the width (the live 22 px is for a 1920x1080 canvas). */
+  captionSize?: number
   chrome: string
   log: (msg: string) => void
 }
@@ -60,14 +62,25 @@ export async function buildReel(
   return r.build(0.8)
 }
 
+/** The talent's live scene, adjusted for a render: its own caption size and optional background. */
+export function renderScene(
+  scene: Scene,
+  o: { width: number; bg?: string; captionSize?: number },
+): Scene {
+  return {
+    ...scene,
+    captions: { ...scene.captions, size: o.captionSize ?? Math.round(o.width * 0.05) },
+    background: o.bg ? { ...scene.background, color: o.bg } : scene.background,
+  }
+}
+
 /** `stage render`: a script read by the talent, recorded to an mp4 without OBS. */
 export async function render(o: RenderOptions): Promise<{ seconds: number; frames: number }> {
   const { cfg, talent, log } = o
   log(`synthesizing ${o.lines.length} line(s)`)
   const { reel, wav } = await buildReel(cfg.voice.url, talent, o.lines, o.gapMs, log)
   const overrides = readOverrides(talent.name)
-  const scene = sceneFrom(overrides)
-  if (o.bg) scene.background = { ...scene.background, color: o.bg }
+  const scene = renderScene(sceneFrom(overrides), o)
   const page = {
     ...reel,
     fps: o.fps,
