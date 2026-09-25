@@ -11,8 +11,11 @@ export interface Transform {
 }
 
 export interface Scene {
-  /** Idle motion: sway amplitude and speed multipliers, blink interval seconds. */
-  motion: { sway: number; speed: number; blink: number }
+  /**
+   * Idle motion: sway amplitude and speed multipliers, blink interval seconds, and a dance
+   * tempo (beats per minute, 0 = off) that bobs the head on the beat while music plays.
+   */
+  motion: { sway: number; speed: number; blink: number; bpm: number }
   captions: { show: boolean; size: number }
   /** Colour, and/or an image path under models_dir (served at /models/) or a URL. */
   background: { color: string; image: string }
@@ -69,7 +72,7 @@ export interface Overrides {
 }
 
 export const DEFAULT_SCENE: Scene = {
-  motion: { sway: 1, speed: 1, blink: 3.7 },
+  motion: { sway: 1, speed: 1, blink: 3.7, bpm: 0 },
   captions: { show: true, size: 22 },
   background: { color: '', image: '' },
   screen: { x: -0.55, y: -0.15, w: 0.4 },
@@ -117,9 +120,16 @@ export function applyOverrides(t: TalentConfig, o: Overrides): void {
   if (o.model) t.model = o.model
 }
 
+/** A dance tempo: 0 (or anything not positive) is off; otherwise held to 40..220 bpm. */
+export function clampBpm(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return 0
+  return Math.min(220, Math.max(40, v))
+}
+
 export function sceneFrom(o: Overrides): Scene {
+  const motion = { ...DEFAULT_SCENE.motion, ...o.scene?.motion }
   return {
-    motion: { ...DEFAULT_SCENE.motion, ...o.scene?.motion },
+    motion: { ...motion, bpm: clampBpm(motion.bpm) },
     captions: { ...DEFAULT_SCENE.captions, ...o.scene?.captions },
     background: { ...DEFAULT_SCENE.background, ...o.scene?.background },
     screen: { ...DEFAULT_SCENE.screen, ...o.scene?.screen },
