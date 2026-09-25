@@ -14,7 +14,7 @@ url = "http://127.0.0.1:8100"
 # Optional: a Wald agent registry, so a talent can name its egirl (`egirl = "kira"`) instead of
 # pinning egirl_url. Resolved at `serve` startup, and again if that egirl stops answering.
 # [wald]
-# url = "http://wald.internal:8000"
+# url = "http://wald.internal:8090"   # the REST API; the egirl registers via [peer_discovery]
 
 [talents.springfield]
 # The egirl instance this talent embodies. Stage talks to its HTTP API (POST /chat, stream).
