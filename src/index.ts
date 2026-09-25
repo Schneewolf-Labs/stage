@@ -2,6 +2,7 @@
 import { copyFileSync, existsSync } from 'node:fs'
 import { loadConfig, pickTalent } from './config'
 import { doctor } from './doctor'
+import { render } from './render'
 import { startServer } from './server'
 import { convert } from './voice'
 
@@ -16,6 +17,10 @@ const HELP = `stage -- VTuber harness for egirl agents
   bun run src/index.ts stop [--url ...]                              cut speech, drop the queue, abort the egirl turn
   bun run src/index.ts convert in.wav out.wav [--rvc egirl] [--pitch 12] [--config stage.toml]
                                                                      your recording, in the RVC voice (voiceovers)
+  bun run src/index.ts render script.txt out.mp4 [--talent NAME] [--width 1080] [--height 1920] [--fps 30]
+                        [--bg '#hex'] [--gap-ms 250] [--chrome PATH] [--config stage.toml]
+                                                                     the talent reads a script (one line per line,
+                                                                     cue tags honoured) into an mp4; needs Chrome + ffmpeg
 
 Start the voice service first: bun run voice   (services/voice/run.sh)
 Then open the stage URL in a browser, or add it to OBS as a browser source.`
@@ -95,6 +100,33 @@ async function main(argv: string[]): Promise<void> {
       log(
         `${output}: ${clip.seconds.toFixed(1)}s of audio in ${((performance.now() - t0) / 1000).toFixed(2)}s via ${rvc}`,
       )
+      return
+    }
+    case 'render': {
+      const [script, out] = args
+      if (!script || !out || script.startsWith('--') || out.startsWith('--'))
+        throw new Error('usage: render script.txt out.mp4 [--talent NAME] ...')
+      const cfg = loadConfig(flag(args, '--config'))
+      const lines = (await Bun.file(script).text())
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+      if (!lines.length) throw new Error(`${script} has no lines`)
+      const n = (name: string, d: number): number => Number(flag(args, name) ?? d)
+      const r = await render({
+        cfg,
+        talent: pickTalent(cfg, flag(args, '--talent')),
+        lines,
+        out,
+        width: n('--width', 1080),
+        height: n('--height', 1920),
+        fps: n('--fps', 30),
+        bg: flag(args, '--bg'),
+        gapMs: n('--gap-ms', 250),
+        chrome: flag(args, '--chrome') ?? process.env.CHROME ?? 'google-chrome',
+        log,
+      })
+      log(`${out}: ${r.seconds.toFixed(1)}s, ${r.frames} frames`)
       return
     }
     default:

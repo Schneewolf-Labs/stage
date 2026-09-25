@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampTransform,
+  clipAt,
   clipStats,
   contextUse,
+  cuesBetween,
   downsample,
   encodeWav,
   fitModel,
@@ -290,5 +292,32 @@ describe('mouthAt', () => {
     expect(mouthAt(track, 9)).toEqual({ open: 0, form: 0 })
     expect(mouthAt(null, 1)).toBeNull()
     expect(mouthAt({ rate: 50, frames: [] }, 0)).toBeNull()
+  })
+})
+
+describe('reel timing', () => {
+  const reel = {
+    duration: 3,
+    clips: [
+      { t0: 0.5, t1: 1.5, text: 'one' },
+      { t0: 1.75, t1: 2.25, text: 'two' },
+    ],
+    cues: [
+      { t: 0.5, cue: { type: 'mood', mood: 'happy' } },
+      { t: 1.75, cue: { type: 'gesture', name: 'nod' } },
+    ],
+  }
+  test('clipAt finds the clip playing at t, or null between clips', () => {
+    expect(clipAt(reel, 0.2)).toBeNull()
+    expect(clipAt(reel, 0.5)?.text).toBe('one')
+    expect(clipAt(reel, 1.49)?.text).toBe('one')
+    expect(clipAt(reel, 1.6)).toBeNull()
+    expect(clipAt(reel, 2)?.text).toBe('two')
+  })
+  test('cuesBetween returns each cue once as frames step past it', () => {
+    expect(cuesBetween(reel, Number.NEGATIVE_INFINITY, 0)).toEqual([])
+    expect(cuesBetween(reel, 0.4, 0.5).map((c) => c.type)).toEqual(['mood'])
+    expect(cuesBetween(reel, 0.5, 1.7)).toEqual([])
+    expect(cuesBetween(reel, 1.7, 3).map((c) => c.type)).toEqual(['gesture'])
   })
 })

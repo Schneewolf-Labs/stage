@@ -13,10 +13,15 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, fitModel, mouthAt } from './core.js'
+import { clampTransform, clipAt, cuesBetween, fitModel, mouthAt } from './core.js'
 
 const q = new URLSearchParams(location.search)
 const editable = q.get('edit') === '1'
+// ?render=1: `stage render` drives this page frame by frame (renderInit/renderFrame below). No
+// WebSocket, no audio; time is a virtual clock so every frame is a function of reel time.
+const rendering = q.get('render') === '1'
+let vclock = 0, renderClipT = 0
+const clock = () => (rendering ? vclock : performance.now())
 if (q.get('bg') === '1') document.body.classList.add('opaque')
 if (q.get('status') === '0') document.getElementById('status').classList.add('hidden')
 const captionParam = q.get('caption') !== '0'
@@ -71,9 +76,9 @@ async function load(url) {
   fit(); window.addEventListener('resize', fit)
   pidx = {}; m.internalModel.coreModel.getModel().parameters.ids.forEach((id, i) => { pidx[id] = i })
 
-  let t = 0, last = performance.now()
+  let t = 0, last = clock()
   m.internalModel.on('beforeModelUpdate', () => {
-    const now = performance.now(), dt = (now - last) / 1000; last = now; t += dt
+    const now = clock(), dt = (now - last) / 1000; last = now; t += dt
     // Idle wander through the focus controller; Cubism physics turns it into hair/body sway.
     const { sway, speed } = scene.motion
     const ts = t * speed
@@ -89,7 +94,8 @@ async function load(url) {
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
     set('ParamBrowLY', cur.bl); set('ParamBrowRY', cur.br); set('ParamBrowLAngle', cur.ba); set('ParamBrowRAngle', cur.ba)
     let level = 0, targetForm = 0
-    const tracked = track && ac ? mouthAt(track, ac.currentTime - trackStart - (ac.outputLatency || ac.baseLatency || 0)) : null
+    const at = rendering ? renderClipT : ac ? ac.currentTime - trackStart - (ac.outputLatency || ac.baseLatency || 0) : null
+    const tracked = track && at !== null ? mouthAt(track, at) : null
     if (tracked) { level = tracked.open; targetForm = tracked.form }
     else if (analyser) {
       const b = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(b)
@@ -116,10 +122,11 @@ async function load(url) {
   model = m
   status(`model ${url}\nparams ${Object.keys(pidx).length}`)
 }
-app.ticker.add(() => { if (model) model.update(app.ticker.deltaMS) })
+if (rendering) app.ticker.stop()
+else app.ticker.add(() => { if (model) model.update(app.ticker.deltaMS) })
 // Browsers pause requestAnimationFrame in hidden tabs. OBS never hides the page, but a plain
 // browser tab in the background would freeze mid-sentence without this.
-setInterval(() => { if (document.hidden && model) { model.update(33); app.render() } }, 33)
+setInterval(() => { if (document.hidden && model && !rendering) { model.update(33); app.render() } }, 33)
 
 /* ---- audio queue: clips play strictly in the order the server announced them ---- */
 const queue = []
@@ -235,6 +242,37 @@ if (window.parent !== window) {
     })
 }
 
+/* ---- offline render: the driver steps frames; reel = {load, fps, duration, clips, cues} ---- */
+let reel = null, renderT = Number.NEGATIVE_INFINITY, renderClip = null
+async function renderInit(r) {
+  reel = r
+  statusEl.classList.add('hidden')
+  await loadExpressions(r.load.expressions || [])
+  transform = clampTransform(r.load.transform)
+  applyScene(r.load.scene)
+  const settle = Math.round(1.5 * r.fps)
+  vclock = ((-settle - 1) * 1000) / r.fps // the model's update hook starts its clock here
+  await load(r.load.model)
+  for (let k = -settle; k < 0; k++) renderFrame(k / r.fps) // let physics settle before t=0
+  renderT = Number.NEGATIVE_INFINITY
+  return { duration: r.duration, params: Object.keys(pidx).length }
+}
+function renderFrame(t) {
+  if (t >= 0) for (const cue of cuesBetween(reel, renderT, t)) apply(cue)
+  renderT = t
+  const clip = t >= 0 ? clipAt(reel, t) : null
+  if (clip !== renderClip) {
+    renderClip = clip
+    track = clip?.mouth || null
+    captionEl.textContent = clip?.text || ''
+    captionEl.style.display = clip && showCaptions() ? 'block' : 'none'
+  }
+  renderClipT = clip ? t - clip.t0 : 0
+  vclock = t * 1000
+  if (model) model.update(1000 / reel.fps)
+  app.render()
+}
+
 /* ---- websocket with reconnect ---- */
 let ws
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)) }
@@ -244,9 +282,9 @@ function connect() {
   ws.onmessage = (ev) => { try { apply(JSON.parse(ev.data)) } catch (e) { status(`bad cue: ${e.message}`) } }
   ws.onclose = () => setTimeout(connect, 1500)
 }
-connect()
+if (!rendering) connect()
 
 // Autoplay policy: audio needs one user gesture in a normal browser tab. OBS's browser source
 // does not enforce it. Any click on the page unlocks the AudioContext.
 document.addEventListener('click', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume() })
-window.stage = { apply, get model() { return model }, get level() { return mouth }, get form() { return form }, get tracked() { return !!track }, get transform() { return transform } }
+window.stage = { apply, renderInit, renderFrame, get model() { return model }, get level() { return mouth }, get form() { return form }, get tracked() { return !!track }, get transform() { return transform } }
