@@ -8,6 +8,7 @@ import {
   fitModel,
   mouthAt,
   readiness,
+  riskyReach,
   riskyTools,
   turnReducer,
 } from '../web/core.js'
@@ -238,6 +239,32 @@ describe('riskyTools', () => {
     ).toEqual(['codeAgent', 'exec', 'files', 'git'])
     expect(riskyTools({ memory: true })).toEqual([])
     expect(riskyTools(undefined)).toEqual([])
+  })
+})
+
+describe('riskyReach', () => {
+  test('names what the instance can hand work to beyond its own tools', () => {
+    // Peers take delegated work; MCP servers bring tools that never show up in `tools`.
+    expect(riskyReach({ peers: 2, mcp: ['witchgrid', 'wald'] })).toEqual([
+      'peers: 2',
+      'mcp: witchgrid, wald',
+    ])
+    expect(riskyReach({ peers: 0, mcp: [] })).toEqual([])
+    // An egirl from before /info named MCP servers: nothing to report, not an error.
+    expect(riskyReach({ tools: {} })).toEqual([])
+    expect(riskyReach(undefined)).toEqual([])
+  })
+  test('readiness counts reach against "tools locked down"', () => {
+    const by = Object.fromEntries(
+      readiness({
+        health: { ok: true, pages: 1, voice: {} },
+        egirl: { ok: true, info: { tools: { exec: false }, peers: 1, mcp: ['witchgrid'] } },
+        modelLoaded: true,
+      }).map((i) => [i.key, i]),
+    )
+    expect(by.tools.ok).toBe(false)
+    expect(by.tools.detail).toMatch(/peers: 1/)
+    expect(by.tools.detail).toMatch(/mcp: witchgrid/)
   })
 })
 

@@ -11,7 +11,7 @@ writeFileSync(join(dir, 'ok', 'ok.model3.json'), '{"Version":3}')
 const voice = Bun.serve({ port: 0, fetch: () => Response.json({ device: 'cpu', rvc: ['egirl'] }) })
 const egirl = Bun.serve({
   port: 0,
-  fetch: () => Response.json({ name: 'e', tools: { exec: true } }),
+  fetch: () => Response.json({ name: 'e', tools: { exec: true }, peers: 1, mcp: ['witchgrid'] }),
 })
 
 const cfg = (model: string, rvc?: string): StageConfig => ({
@@ -42,6 +42,7 @@ describe('doctor', () => {
     expect(by['talent t: egirl'].ok).toBe(true)
     expect(by['talent t: tools'].ok).toBe(false)
     expect(by['talent t: tools'].detail).toMatch(/exec/)
+    expect(by['talent t: tools'].detail).toMatch(/peers: 1.*mcp: witchgrid/)
     expect(r.every((c) => typeof c.detail === 'string')).toBe(true)
   })
   test('flags a missing model, an unknown rvc model, and a dead egirl', async () => {

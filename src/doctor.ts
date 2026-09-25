@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { riskyTools } from '../web/core.js'
+import { riskyReach, riskyTools } from '../web/core.js'
 import type { StageConfig } from './config'
 import { brain, egirlUp } from './egirl'
 import { voiceHealth } from './voice'
@@ -55,15 +55,17 @@ export async function doctor(cfg: StageConfig): Promise<Check[]> {
       detail: up ? t.egirl_url : `${t.egirl_url} unreachable`,
     })
     const b = up ? await brain(t) : undefined
-    const info = b?.ok ? (b.info as { tools?: Record<string, unknown> }) : undefined
-    const risky = riskyTools(info?.tools)
+    const info = b?.ok
+      ? (b.info as { tools?: Record<string, unknown>; peers?: number; mcp?: string[] })
+      : undefined
+    const risky = [...riskyTools(info?.tools), ...riskyReach(info)]
     out.push({
       name: `talent ${t.name}: tools`,
       ok: !!info && risky.length === 0,
       detail: !info
         ? 'unknown (egirl not reachable)'
         : risky.length
-          ? `world-acting tools enabled: ${risky.join(', ')}`
+          ? `can act on the world: ${risky.join(', ')}`
           : 'locked down',
     })
   }
