@@ -5,6 +5,7 @@ import {
   contextUse,
   downsample,
   encodeWav,
+  eyeTarget,
   fitModel,
   mouthAt,
   readiness,
@@ -290,5 +291,23 @@ describe('mouthAt', () => {
     expect(mouthAt(track, 9)).toEqual({ open: 0, form: 0 })
     expect(mouthAt(null, 1)).toBeNull()
     expect(mouthAt({ rate: 50, frames: [] }, 0)).toBeNull()
+  })
+})
+
+describe('eyeTarget', () => {
+  test('happy smiles with the eyes on a model that has the smile params', () => {
+    const e = eyeTarget('happy', true)
+    expect(e.smile).toBeGreaterThan(0)
+    expect(e.eye).toBeLessThan(0.85)
+  })
+  test('without smile params the eyes are what they always were', () => {
+    const today = { neutral: 1, happy: 0.85, sad: 0.7, angry: 0.9, surprised: 1.15 }
+    for (const [mood, eye] of Object.entries(today))
+      expect(eyeTarget(mood, false)).toEqual({ eye, smile: 0 })
+  })
+  test('only happy smiles; unknown moods are neutral', () => {
+    for (const mood of ['neutral', 'sad', 'angry', 'surprised'])
+      expect(eyeTarget(mood, true).smile).toBe(0)
+    expect(eyeTarget('confused', true)).toEqual({ eye: 1, smile: 0 })
   })
 })

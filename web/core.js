@@ -148,3 +148,14 @@ export function mouthAt(track, t) {
   const b = track.frames[Math.min(i + 1, track.frames.length - 1)]
   return { open: a[0] + (b[0] - a[0]) * f, form: a[1] + (b[1] - a[1]) * f }
 }
+
+/**
+ * Eye targets for a parameter-driven mood: openness and, on models that have
+ * ParamEyeLSmile/RSmile, the smile that curves the eyes into ^^ for happy. Models without the
+ * smile params keep the plain openness values. Blink is applied on top by the page.
+ */
+const EYES = { neutral: 1, happy: 0.85, sad: 0.7, angry: 0.9, surprised: 1.15 }
+export function eyeTarget(mood, hasSmile) {
+  if (hasSmile && mood === 'happy') return { eye: 0, smile: 1 }
+  return { eye: EYES[mood] ?? EYES.neutral, smile: 0 }
+}
