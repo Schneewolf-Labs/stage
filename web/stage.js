@@ -46,7 +46,7 @@ let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
-let mood = 'neutral', state = 'idle', poseOn = 0, nodT = -1
+let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
 let mouth = 0, analyser = null, ac = null
 // Lipsync: a clip's mouth track (from the voice service) is read at the audio clock; the
@@ -87,7 +87,7 @@ async function load(url) {
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
     const driven = expressions[mood] ? 'neutral' : mood
     const hasSmile = pidx.ParamEyeLSmile !== undefined
-    const target = { ...(MOODS[driven] || MOODS.neutral), ...eyeTarget(driven, hasSmile) }
+    const target = { ...(MOODS[driven] || MOODS.neutral), ...eyeTarget(driven, hasSmile, (performance.now() - moodAt) / 1000) }
     for (const k in cur) cur[k] = lerp(cur[k], target[k], 0.08)
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
     if (hasSmile) { set('ParamEyeLSmile', cur.smile); set('ParamEyeRSmile', cur.smile) }
@@ -177,7 +177,7 @@ function apply(cue) {
     case 'image': showImage(cue); break
     case 'scene': applyScene(cue.scene); break
     case 'speak': queue.push(cue); pump(); break
-    case 'mood': mood = cue.mood; break
+    case 'mood': mood = cue.mood; moodAt = performance.now(); break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break
