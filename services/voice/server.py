@@ -4,6 +4,9 @@
                    -> audio/wav (24 kHz mono)
     POST /convert?rvc=egirl&pitch=12   body: a WAV file (any rate, mono or stereo)
                    -> audio/wav, the same speech in the RVC model's voice. For recorded voiceovers.
+    POST /mouth    body: a WAV (any rate, mono or stereo)
+                   -> {"rate": 50, "frames": [[open, form], ...]}, the lipsync track of that audio.
+                   For songs: Stage plays the mix and moves the mouth to the vocal stem.
     POST /transcribe   body: a WAV (any rate) -> {"text": "...", "seconds": 3.2, "ms": 410}
                    whisper.cpp (WHISPER_MODEL, default base.en) for the console's push-to-talk.
     GET  /health   -> {"device": ..., "rvc": [...], "loaded_rvc": [...], "whisper": "base.en"}
@@ -193,6 +196,10 @@ class Handler(BaseHTTPRequestHandler):
                     text, seconds = transcribe(audio, sr)
                 return self._send(200, json.dumps({'text': text, 'seconds': round(seconds, 2),
                                                    'ms': round((time.perf_counter() - t0) * 1000)}).encode())
+            elif u.path.rstrip('/') == '/mouth':
+                audio, sr = sf.read(io.BytesIO(self.rfile.read(n)), dtype='float32')
+                track = mouth_track(to_mono_24k(audio, sr))
+                return self._send(200, json.dumps(track, separators=(',', ':')).encode())
             elif u.path.rstrip('/') == '/convert':
                 q = parse_qs(u.query)
                 rvc = (q.get('rvc') or [''])[0]

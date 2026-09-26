@@ -93,3 +93,33 @@ export async function transcribe(voiceUrl: string, wav: ArrayBuffer): Promise<Tr
   if (!res.ok) throw new Error(`voice service HTTP ${res.status}: ${await res.text()}`)
   return (await res.json()) as Transcript
 }
+
+/** The lipsync track of any WAV (a song's vocal stem), from the voice service. */
+export async function mouth(voiceUrl: string, wav: ArrayBuffer): Promise<MouthTrack> {
+  const res = await fetch(`${voiceUrl}/mouth`, {
+    method: 'POST',
+    headers: { 'content-type': 'audio/wav' },
+    body: wav,
+  })
+  if (!res.ok) throw new Error(`voice service HTTP ${res.status}: ${await res.text()}`)
+  return (await res.json()) as MouthTrack
+}
+
+/** Length of a PCM WAV from its header: the data chunk's size over the fmt chunk's byte rate. */
+export function wavSeconds(wav: ArrayBuffer): number {
+  const v = new DataView(wav)
+  const tag = (o: number): string =>
+    String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3))
+  if (wav.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV')
+  let byteRate = 0
+  for (let o = 12; o + 8 <= wav.byteLength; ) {
+    const size = v.getUint32(o + 4, true)
+    if (tag(o) === 'fmt ') byteRate = v.getUint32(o + 16, true)
+    if (tag(o) === 'data') {
+      if (!byteRate) throw new Error('WAV has no fmt chunk before data')
+      return Math.min(size, wav.byteLength - o - 8) / byteRate
+    }
+    o += 8 + size + (size & 1)
+  }
+  throw new Error('WAV has no data chunk')
+}
