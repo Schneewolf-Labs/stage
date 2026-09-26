@@ -5,6 +5,7 @@ import { doctor } from './doctor'
 import { render } from './render'
 import { startServer } from './server'
 import { convert } from './voice'
+import { resolveTalent } from './wald'
 
 const HELP = `stage -- VTuber harness for egirl agents
 
@@ -73,6 +74,8 @@ async function main(argv: string[]): Promise<void> {
       const talent = pickTalent(cfg, flag(args, '--talent'))
       const port = flag(args, '--port')
       if (port) cfg.server.port = Number(port) // two talents = two processes on two ports
+      if (await resolveTalent(cfg, talent))
+        log(`egirl ${talent.egirl} is at ${talent.egirl_url} (wald ${cfg.wald?.url})`)
       startServer({ cfg, talent, log })
       return
     }

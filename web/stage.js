@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, clipAt, cuesBetween, danceAt, fitModel, mouthAt } from './core.js'
+import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt } from './core.js'
 
 const q = new URLSearchParams(location.search)
 const editable = q.get('edit') === '1'
@@ -33,12 +33,13 @@ const status = (s) => { statusEl.textContent = s }
 const app = new PIXI.Application({ resizeTo: window, backgroundAlpha: 0, antialias: true })
 document.body.appendChild(app.view)
 
+// Eyes come from core.eyeTarget, which knows about models with eye-smile params.
 const MOODS = {
-  neutral:   { bl: 0,    br: 0,    ba: 0,    form: 0,    eye: 1 },
-  happy:     { bl: 0.6,  br: 0.6,  ba: 0,    form: 1,    eye: 0.85 },
-  sad:       { bl: -0.5, br: -0.5, ba: -0.6, form: -0.8, eye: 0.7 },
-  angry:     { bl: -0.9, br: -0.9, ba: 0.8,  form: -0.4, eye: 0.9 },
-  surprised: { bl: 0.9,  br: 0.9,  ba: 0,    form: 0.2,  eye: 1.15 },
+  neutral:   { bl: 0,    br: 0,    ba: 0,    form: 0 },
+  happy:     { bl: 0.6,  br: 0.6,  ba: 0,    form: 1 },
+  sad:       { bl: -0.5, br: -0.5, ba: -0.6, form: -0.8 },
+  angry:     { bl: -0.9, br: -0.9, ba: 0.8,  form: -0.4 },
+  surprised: { bl: 0.9,  br: 0.9,  ba: 0,    form: 0.2 },
 }
 const lerp = (a, b, k) => a + (b - a) * k
 
@@ -50,10 +51,10 @@ let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
-let mood = 'neutral', state = 'idle', poseOn = 0, nodT = -1
+let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
 // Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
 let beatT0 = clock(), tilt = 0, bodyTilt = 0
-const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1 }
+const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
 let mouth = 0, analyser = null, ac = null
 // Lipsync: a clip's mouth track (from the voice service) is read at the audio clock; the
 // analyser is only the fallback for clips without one. See core.mouthAt.
@@ -94,9 +95,12 @@ async function load(url) {
     fx += d.fx; fy += d.fy
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
-    const target = expressions[mood] ? MOODS.neutral : (MOODS[mood] || MOODS.neutral)
+    const driven = expressions[mood] ? 'neutral' : mood
+    const hasSmile = pidx.ParamEyeLSmile !== undefined
+    const target = { ...(MOODS[driven] || MOODS.neutral), ...eyeTarget(driven, hasSmile, (clock() - moodAt) / 1000) }
     for (const k in cur) cur[k] = lerp(cur[k], target[k], 0.08)
     set('ParamEyeLOpen', cur.eye * blink); set('ParamEyeROpen', cur.eye * blink)
+    if (hasSmile) { set('ParamEyeLSmile', cur.smile); set('ParamEyeRSmile', cur.smile) }
     set('ParamBrowLY', cur.bl); set('ParamBrowRY', cur.br); set('ParamBrowLAngle', cur.ba); set('ParamBrowRAngle', cur.ba)
     let level = 0, targetForm = 0
     const at = rendering ? renderClipT : ac ? ac.currentTime - trackStart - (ac.outputLatency || ac.baseLatency || 0) : null
@@ -188,7 +192,7 @@ function apply(cue) {
     case 'image': showImage(cue); break
     case 'scene': applyScene(cue.scene); break
     case 'speak': queue.push(cue); pump(); break
-    case 'mood': mood = cue.mood; break
+    case 'mood': mood = cue.mood; moodAt = clock(); break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break

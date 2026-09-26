@@ -162,6 +162,20 @@ export function cuesBetween(reel, from, to) {
 }
 
 /**
+ * Eye targets for a parameter-driven mood: openness and, on models that have
+ * ParamEyeLSmile/RSmile, the smile that curves the eyes into ^^ for happy. The ^^ lasts
+ * SMILE_S after the mood cue (`since`, seconds): a mood holds until the next tag, and eyes shut
+ * for minutes read as asleep. Models without the smile params keep the plain openness values.
+ * Blink is applied on top by the page.
+ */
+const EYES = { neutral: 1, happy: 0.85, sad: 0.7, angry: 0.9, surprised: 1.15 }
+const SMILE_S = 1.6
+export function eyeTarget(mood, hasSmile, since) {
+  if (hasSmile && mood === 'happy' && since < SMILE_S) return { eye: 0, smile: 1 }
+  return { eye: EYES[mood] ?? EYES.neutral, smile: 0 }
+}
+
+/**
  * Dancing to a tempo: the head dips on every beat and sways side to side every two beats.
  * `t` is seconds since the beat anchor. fx/fy are focus offsets added to the idle wander;
  * tilt and body are degrees for ParamAngleZ and ParamBodyAngleZ. All zero when bpm is 0.
