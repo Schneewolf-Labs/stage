@@ -38,7 +38,7 @@ import type { ConsoleEvent, StageCue, StageReport } from './types'
 import { mouth, transcribe, voiceHealth, wavSeconds } from './voice'
 import { resolveTalent } from './wald'
 
-const WEB_DIR = resolve(import.meta.dir, '../web')
+export const WEB_DIR = resolve(import.meta.dir, '../web')
 const MAX_CLIPS = 64
 /** Grace after a clip's own length before we stop counting it as "still speaking". */
 const SPOKE_GRACE_MS = 5000
@@ -71,7 +71,7 @@ async function passThrough(r: Response): Promise<Response> {
 }
 
 /** Serve a file below `root`, refusing anything that escapes it. */
-function serveUnder(root: string, rel: string): Response {
+export function serveUnder(root: string, rel: string): Response {
   const path = normalize(join(root, decodeURIComponent(rel)))
   if (!path.startsWith(root) || !existsSync(path)) return new Response('not found', { status: 404 })
   return new Response(Bun.file(path))

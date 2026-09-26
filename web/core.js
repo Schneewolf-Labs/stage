@@ -149,6 +149,18 @@ export function mouthAt(track, t) {
   return { open: a[0] + (b[0] - a[0]) * f, form: a[1] + (b[1] - a[1]) * f }
 }
 
+/* Offline render (`stage render`): a reel is {duration, clips: [{t0, t1, text, mouth}], cues: [{t, cue}]}. */
+
+/** The clip playing at render time t, or null between clips. */
+export function clipAt(reel, t) {
+  return reel.clips.find((c) => t >= c.t0 && t < c.t1) ?? null
+}
+
+/** Cues whose time falls in (from, to]: stepping frames forward applies each cue exactly once. */
+export function cuesBetween(reel, from, to) {
+  return reel.cues.filter((c) => c.t > from && c.t <= to).map((c) => c.cue)
+}
+
 /**
  * Eye targets for a parameter-driven mood: openness and, on models that have
  * ParamEyeLSmile/RSmile, the smile that curves the eyes into ^^ for happy. The ^^ lasts

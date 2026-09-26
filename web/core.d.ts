@@ -21,6 +21,9 @@ export type { Scene, Transform }
 export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
 export function downsample(samples: Float32Array, from: number, to: number): Float32Array
 export interface MouthTrack { rate: number; frames: [number, number][] }
+export interface Reel { duration: number; clips: { t0: number; t1: number; text: string; mouth?: MouthTrack }[]; cues: { t: number; cue: { type: string; [k: string]: unknown } }[] }
+export function clipAt(reel: Reel, t: number): Reel['clips'][number] | null
+export function cuesBetween(reel: Reel, from: number, to: number): Reel['cues'][number]['cue'][]
 export function mouthAt(track: MouthTrack | null | undefined, t: number): { open: number; form: number } | null
 export function eyeTarget(mood: string, hasSmile: boolean, since: number): { eye: number; smile: number }
 export function danceAt(t: number, bpm: number, sway: number): { fx: number; fy: number; tilt: number; body: number }
