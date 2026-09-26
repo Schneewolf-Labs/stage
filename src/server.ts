@@ -21,6 +21,7 @@ import {
 import { findExpressions, findModels } from './models'
 import { perform, type Stage, speak } from './performer'
 import {
+  clampBpm,
   DIR,
   directorFrom,
   HOTKEY_ACTIONS,
@@ -34,7 +35,7 @@ import {
 import { ScriptRunner } from './script'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { ConsoleEvent, StageCue, StageReport } from './types'
-import { transcribe, voiceHealth } from './voice'
+import { mouth, transcribe, voiceHealth, wavSeconds } from './voice'
 
 export const WEB_DIR = resolve(import.meta.dir, '../web')
 const MAX_CLIPS = 64
@@ -298,6 +299,37 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
         if (send) runTurn(t.text).catch((e) => log(`mic turn failed: ${e}`))
         return json({ ...t, sent: send })
       }
+      if (req.method === 'POST' && path === '/song') {
+        // A finished song: the mix is what is heard, the vocal stem (when given) moves the mouth,
+        // so drums and bass do not flap it. Multipart: mix, vocal?, title?.
+        const form = await req.formData().catch(() => undefined)
+        const mix = form?.get('mix')
+        if (!(mix instanceof Blob) || mix.size <= 44)
+          return json({ error: 'a mix WAV is required (multipart field "mix")' }, 400)
+        const vocal = form?.get('vocal')
+        const title = String(form?.get('title') ?? '').trim() || 'song'
+        if (muted) {
+          log(`muted, skipped song: ${title}`)
+          return json({ ok: true, muted: true })
+        }
+        const wav = await mix.arrayBuffer()
+        let seconds: number
+        try {
+          seconds = wavSeconds(wav)
+        } catch (e) {
+          return json({ error: `mix: ${(e as Error).message}` }, 400)
+        }
+        const t0 = performance.now()
+        const stem = vocal instanceof Blob && vocal.size > 44 ? await vocal.arrayBuffer() : wav
+        const track = await mouth(cfg.voice.url, stem).catch((e: Error) => ({ error: e.message }))
+        if ('error' in track) return json(track, 502)
+        const { id, url: clipUrl } = stage.addClip(wav, seconds)
+        stage.cue({ type: 'speak', id, url: clipUrl, text: title, mouth: track })
+        const genMs = Math.round(performance.now() - t0)
+        stage.event({ type: 'clip', id, text: title, seconds, genMs })
+        log(`song ${seconds.toFixed(1)}s: ${title}${stem === wav ? ' (mouth from the mix)' : ''}`)
+        return json({ ok: true, id, seconds })
+      }
       if (req.method === 'POST') {
         const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
         if (path === '/say') {
@@ -363,13 +395,16 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           return json({ ok: true, ...t })
         }
         if (path === '/scene') {
+          const bpm = (body.motion as { bpm?: unknown } | undefined)?.bpm
+          if (bpm !== undefined && typeof bpm !== 'number')
+            return json({ error: 'motion.bpm must be a number (0 = off)' }, 400)
           const cur = sceneFrom(overrides)
           const pick = <K extends keyof Scene>(k: K): Scene[K] =>
             typeof body[k] === 'object' && body[k]
               ? { ...cur[k], ...(body[k] as Partial<Scene[K]>) }
               : cur[k]
           overrides.scene = {
-            motion: pick('motion'),
+            motion: { ...pick('motion'), bpm: clampBpm(pick('motion').bpm) },
             captions: pick('captions'),
             background: pick('background'),
             screen: pick('screen'),
