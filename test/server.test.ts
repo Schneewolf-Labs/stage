@@ -616,6 +616,8 @@ describe('director', () => {
     await post('/director', { prompt: 'once' })
     await post('/director/run')
     await con.waitFor((m) => m.type === 'turn' && m.phase === 'start' && m.message === 'once')
+    // Let the turn finish; otherwise its reply is still speaking into the next test's page.
+    await con.waitFor((m) => m.type === 'turn' && m.phase === 'done')
     con.close()
   })
   test('POST /director validates the interval', async () => {
