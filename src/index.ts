@@ -15,6 +15,8 @@ const HELP = `stage -- VTuber harness for egirl agents
   bun run src/index.ts chat "message" [--url ...]                    send a message to the talent's egirl and perform the reply
   bun run src/index.ts cue  '{"type":"mood","mood":"happy"}' [--url ...]
   bun run src/index.ts stop [--url ...]                              cut speech, drop the queue, abort the egirl turn
+  bun run src/index.ts song mix.wav [--vocal vocal.wav] [--title "..."] [--url ...]
+                                                                     play a finished song; the mouth follows the vocal stem
   bun run src/index.ts convert in.wav out.wav [--rvc egirl] [--pitch 12] [--config stage.toml]
                                                                      your recording, in the RVC voice (voiceovers)
 
@@ -80,6 +82,19 @@ async function main(argv: string[]): Promise<void> {
       return post(base, '/cue', JSON.parse(args[0] ?? '{}'))
     case 'stop':
       return post(base, '/interrupt', {})
+    case 'song': {
+      const [mix] = args
+      if (!mix) throw new Error('usage: song mix.wav [--vocal vocal.wav] [--title "..."]')
+      const form = new FormData()
+      form.append('mix', Bun.file(mix), 'mix.wav')
+      const vocal = flag(args, '--vocal')
+      if (vocal) form.append('vocal', Bun.file(vocal), 'vocal.wav')
+      form.append('title', flag(args, '--title') ?? '')
+      const res = await fetch(`${base}/song`, { method: 'POST', body: form })
+      console.log(await res.text())
+      if (!res.ok) process.exit(1)
+      return
+    }
     case 'convert': {
       const [input, output] = args
       if (!input || !output)
