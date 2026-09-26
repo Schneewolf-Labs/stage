@@ -6,6 +6,7 @@ import {
   danceAt,
   downsample,
   encodeWav,
+  eyeTarget,
   fitModel,
   mouthAt,
   readiness,
@@ -291,6 +292,29 @@ describe('mouthAt', () => {
     expect(mouthAt(track, 9)).toEqual({ open: 0, form: 0 })
     expect(mouthAt(null, 1)).toBeNull()
     expect(mouthAt({ rate: 50, frames: [] }, 0)).toBeNull()
+  })
+})
+
+describe('eyeTarget', () => {
+  test('happy smiles with the eyes when the mood arrives, on a model with the smile params', () => {
+    const e = eyeTarget('happy', true, 0.3)
+    expect(e.smile).toBeGreaterThan(0)
+    expect(e.eye).toBeLessThan(0.85)
+  })
+  test('the smile is a moment, not a state: the eyes reopen while happy lasts', () => {
+    // A mood holds until the next mood tag, possibly minutes; closed eyes that long read as asleep.
+    expect(eyeTarget('happy', true, 3)).toEqual({ eye: 0.85, smile: 0 })
+    expect(eyeTarget('happy', true, 0).smile).toBe(1)
+  })
+  test('without smile params the eyes are what they always were', () => {
+    const today = { neutral: 1, happy: 0.85, sad: 0.7, angry: 0.9, surprised: 1.15 }
+    for (const [mood, eye] of Object.entries(today))
+      expect(eyeTarget(mood, false, 0.3)).toEqual({ eye, smile: 0 })
+  })
+  test('only happy smiles; unknown moods are neutral', () => {
+    for (const mood of ['neutral', 'sad', 'angry', 'surprised'])
+      expect(eyeTarget(mood, true, 0.3).smile).toBe(0)
+    expect(eyeTarget('confused', true, 0.3)).toEqual({ eye: 1, smile: 0 })
   })
 })
 
