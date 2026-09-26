@@ -7,9 +7,9 @@ import { readOverrides } from '../src/persist'
 import { startServer } from '../src/server'
 
 /* ---- fakes: a voice service and an egirl instance on ephemeral ports ---- */
-const WAV = (() => {
+const wavOf = (seconds: number): ArrayBuffer => {
   const sr = 24000,
-    n = sr,
+    n = sr * seconds,
     buf = new ArrayBuffer(44 + n * 2),
     v = new DataView(buf)
   const str = (o: number, s: string) => {
@@ -29,7 +29,8 @@ const WAV = (() => {
   str(36, 'data')
   v.setUint32(40, n * 2, true)
   return buf
-})()
+}
+const WAV = wavOf(1)
 const voiceCalls: unknown[] = []
 const voice = Bun.serve({
   port: 0,
@@ -39,6 +40,13 @@ const voice = Bun.serve({
     if (p === '/transcribe') {
       const n = (await req.arrayBuffer()).byteLength
       return Response.json({ text: n > 44 ? 'hello from the mic' : '', seconds: 1.0, ms: 12 })
+    }
+    if (p === '/mouth') {
+      // The real service returns {rate, frames} for any WAV; here the openness tells a long
+      // body (the 2 s vocal in the song tests) from a short one (the 1 s mix).
+      const n = (await req.arrayBuffer()).byteLength
+      if (n <= 44) return Response.json({ error: 'a WAV body is required' }, { status: 400 })
+      return Response.json({ rate: 50, frames: [[n > 60000 ? 0.9 : 0.1, 0]] })
     }
     if (p === '/tts') {
       voiceCalls.push(await req.json())
@@ -291,7 +299,7 @@ describe('discovery', () => {
     expect(t.name).toBe('test')
     expect(t.talents).toEqual(['test'])
     expect(t.transform).toEqual({ x: 0, y: 0, scale: 1 })
-    expect(t.scene.motion).toEqual({ sway: 1, speed: 1, blink: 3.7 })
+    expect(t.scene.motion).toEqual({ sway: 1, speed: 1, blink: 3.7, bpm: 0 })
     expect(t.muted).toBe(false)
   })
   test('GET /health reports egirl reachability and mute', async () => {
@@ -360,6 +368,19 @@ describe('layout and scene', () => {
   test('POST /transform rejects non-numbers', async () => {
     expect((await post('/transform', { x: 'left' })).status).toBe(400)
   })
+  test('POST /scene carries a dance tempo, clamped, and rejects a non-number', async () => {
+    await post('/scene', { motion: { bpm: 128 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(128)
+    expect(readOverrides('test', overridesDir).scene?.motion?.bpm).toBe(128)
+    await post('/scene', { motion: { bpm: 999 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(220)
+    await post('/scene', { motion: { bpm: 12 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(40)
+    await post('/scene', { motion: { bpm: -5 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(0)
+    expect((await post('/scene', { motion: { bpm: 'fast' } })).status).toBe(400)
+    await post('/scene', { motion: { bpm: 0 } })
+  })
   test('POST /scene merges, broadcasts and persists', async () => {
     const page = await client()
     await post('/scene', { motion: { sway: 0.4 }, captions: { size: 30 } })
@@ -368,7 +389,7 @@ describe('layout and scene', () => {
       motion: { sway: number; speed: number }
       captions: { size: number; show: boolean }
     }
-    expect(scene.motion).toEqual({ sway: 0.4, speed: 1, blink: 3.7 })
+    expect(scene.motion).toEqual({ sway: 0.4, speed: 1, blink: 3.7, bpm: 0 })
     expect(scene.captions).toEqual({ show: true, size: 30 })
     expect(readOverrides('test', overridesDir).scene?.motion?.sway).toBe(0.4)
     await post('/scene', { background: { color: '#123456' } })
@@ -716,6 +737,47 @@ describe('lipsync track', () => {
       ],
     })
     page.close()
+  })
+})
+
+describe('song', () => {
+  const song = (parts: Record<string, ArrayBuffer | string>) => {
+    const form = new FormData()
+    for (const [k, v] of Object.entries(parts))
+      if (typeof v === 'string') form.append(k, v)
+      else form.append(k, new Blob([v], { type: 'audio/wav' }), `${k}.wav`)
+    return fetch(`${base}/song`, { method: 'POST', body: form })
+  }
+  test('POST /song plays the mix with the mouth track of the vocal', async () => {
+    // A console sees cues too and, unlike the test page, never reports the clip spoken (which
+    // would free it before we fetch it).
+    const con = await client('console')
+    const r = await song({ mix: WAV, vocal: wavOf(2), title: 'Pixel Heart' })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { ok: boolean; seconds: number }
+    expect(body.seconds).toBeCloseTo(1, 2)
+    const cue = await con.waitFor((m) => m.type === 'speak' && m.text === 'Pixel Heart')
+    expect(cue.mouth).toEqual({ rate: 50, frames: [[0.9, 0]] })
+    const clip = await fetch(base + String(cue.url))
+    expect((await clip.arrayBuffer()).byteLength).toBe(WAV.byteLength)
+    const ev = await con.waitFor((m) => m.type === 'clip' && m.id === cue.id)
+    expect(ev.seconds).toBeCloseTo(1, 2)
+    con.close()
+  })
+  test('without a vocal the mouth track comes from the mix', async () => {
+    const page = await client()
+    await song({ mix: WAV, title: 'No stem' })
+    const cue = await page.waitFor((m) => m.type === 'speak' && m.text === 'No stem')
+    expect(cue.mouth).toEqual({ rate: 50, frames: [[0.1, 0]] })
+    page.close()
+  })
+  test('POST /song needs a mix and is skipped while muted', async () => {
+    expect((await song({ title: 'x' })).status).toBe(400)
+    expect((await song({ mix: new ArrayBuffer(0) })).status).toBe(400)
+    await post('/mute', { on: true })
+    const r = (await (await song({ mix: WAV })).json()) as { muted?: boolean }
+    expect(r.muted).toBe(true)
+    await post('/mute', { on: false })
   })
 })
 

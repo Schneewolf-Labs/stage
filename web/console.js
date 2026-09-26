@@ -204,7 +204,7 @@ bindRange('tx', 'txVal', (v) => v.toFixed(2), pushTransform); bindRange('ty', 't
 $('btnResetTransform').addEventListener('click', () => post('/transform', { x: 0, y: 0, scale: 1 }))
 function applySceneUI(sc) {
   if (!sc) return
-  setRange('sway', 'swayVal', sc.motion.sway, (v) => v.toFixed(2)); setRange('mspeed', 'mspeedVal', sc.motion.speed, (v) => v.toFixed(2)); setRange('blink', 'blinkVal', sc.motion.blink, (v) => v.toFixed(1))
+  setRange('sway', 'swayVal', sc.motion.sway, (v) => v.toFixed(2)); setRange('mspeed', 'mspeedVal', sc.motion.speed, (v) => v.toFixed(2)); setRange('blink', 'blinkVal', sc.motion.blink, (v) => v.toFixed(1)); setRange('bpm', 'bpmVal', sc.motion.bpm ?? 0, bpmLabel)
   $('capShow').checked = sc.captions.show; setRange('capSize', 'capSizeVal', sc.captions.size, (v) => v)
   if (sc.background.color) $('bgColor').value = sc.background.color
   $('bgImage').value = sc.background.image || ''
@@ -216,8 +216,12 @@ $('btnTestImage').addEventListener('click', () => post('/image', { url: '/models
 $('btnClearImage').addEventListener('click', () => post('/image', { url: null }))
 $('btnBgImage').addEventListener('click', () => post('/scene', { background: { image: $('bgImage').value.trim() } }))
 $('btnBgImageClear').addEventListener('click', () => post('/scene', { background: { image: '' } }))
-const pushMotion = debounce(() => post('/scene', { motion: { sway: Number($('sway').value), speed: Number($('mspeed').value), blink: Number($('blink').value) } }), 120)
+const pushMotion = debounce(() => post('/scene', { motion: { sway: Number($('sway').value), speed: Number($('mspeed').value), blink: Number($('blink').value), bpm: Number($('bpm').value) } }), 120)
 bindRange('sway', 'swayVal', (v) => v.toFixed(2), pushMotion); bindRange('mspeed', 'mspeedVal', (v) => v.toFixed(2), pushMotion); bindRange('blink', 'blinkVal', (v) => v.toFixed(1), pushMotion)
+// Below 40 bpm is off (the server clamps); re-sending the scene restarts the beat on every page.
+function bpmLabel(v) { return v < 40 ? 'off' : `${v} bpm` }
+bindRange('bpm', 'bpmVal', bpmLabel, pushMotion)
+$('btnBeatSync').addEventListener('click', () => post('/scene', { motion: { bpm: Number($('bpm').value) } }))
 const pushCaptions = debounce(() => post('/scene', { captions: { show: $('capShow').checked, size: Number($('capSize').value) } }), 120)
 $('capShow').addEventListener('change', pushCaptions); bindRange('capSize', 'capSizeVal', (v) => v, pushCaptions)
 $('btnBgApply').addEventListener('click', () => post('/scene', { background: { color: $('bgColor').value } }))

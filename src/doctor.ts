@@ -1,14 +1,65 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { riskyReach, riskyTools } from '../web/core.js'
-import type { StageConfig } from './config'
+import type { StageConfig, TalentConfig } from './config'
 import { brain, egirlUp } from './egirl'
-import { voiceHealth } from './voice'
+import { synthesize, transcribe, voiceHealth } from './voice'
 
 export interface Check {
   name: string
   ok: boolean
   detail: string
+}
+
+/** What the round-trip check says and expects to hear back: plain words, no digits to spell out. */
+export const ROUND_TRIP_TEXT = 'The quick brown fox jumps over the lazy dog.'
+/**
+ * Whisper base.en hears clean Kokoro speech word for word; RVC can cost a word or two. Below
+ * 60% the voice is not something a viewer would understand (wrong pitch, broken RVC model).
+ */
+const ROUND_TRIP_MIN = 0.6
+
+const words = (s: string): string[] =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+
+/** Fraction of the expected words that were heard; each heard word is matched at most once. */
+export function heardScore(expected: string, heard: string): number {
+  const want = words(expected)
+  if (!want.length) return 0
+  const got = words(heard)
+  let hit = 0
+  for (const w of want) {
+    const i = got.indexOf(w)
+    if (i >= 0) {
+      hit++
+      got.splice(i, 1)
+    }
+  }
+  return hit / want.length
+}
+
+/** Speak a known sentence in the talent's voice and see whether whisper hears it. */
+async function roundTrip(voiceUrl: string, t: TalentConfig): Promise<Check> {
+  const name = `talent ${t.name}: voice round-trip`
+  try {
+    const t0 = performance.now()
+    const clip = await synthesize(voiceUrl, t, ROUND_TRIP_TEXT)
+    const t1 = performance.now()
+    const heard = await transcribe(voiceUrl, clip.wav)
+    const ms = (x: number): string => `${Math.round(x)} ms`
+    const score = heardScore(ROUND_TRIP_TEXT, heard.text)
+    return {
+      name,
+      ok: score >= ROUND_TRIP_MIN,
+      detail: `${Math.round(score * 100)}% heard: "${heard.text}" (tts ${ms(t1 - t0)}, whisper ${ms(performance.now() - t1)})`,
+    }
+  } catch (e) {
+    return { name, ok: false, detail: (e as Error).message }
+  }
 }
 
 /**
@@ -48,6 +99,17 @@ export async function doctor(cfg: StageConfig): Promise<Check[]> {
             ? t.rvc
             : `${t.rvc} not in services/voice/models`,
       })
+    out.push(
+      v.error
+        ? { name: `talent ${t.name}: voice round-trip`, ok: false, detail: 'voice service down' }
+        : !v.whisper
+          ? {
+              name: `talent ${t.name}: voice round-trip`,
+              ok: false,
+              detail: 'voice service has no whisper',
+            }
+          : await roundTrip(cfg.voice.url, t),
+    )
     const up = await egirlUp(t)
     out.push({
       name: `talent ${t.name}: egirl`,
