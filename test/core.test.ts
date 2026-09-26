@@ -3,6 +3,7 @@ import {
   clampTransform,
   clipStats,
   contextUse,
+  danceAt,
   downsample,
   encodeWav,
   eyeTarget,
@@ -314,5 +315,32 @@ describe('eyeTarget', () => {
     for (const mood of ['neutral', 'sad', 'angry', 'surprised'])
       expect(eyeTarget(mood, true, 0.3).smile).toBe(0)
     expect(eyeTarget('confused', true, 0.3)).toEqual({ eye: 1, smile: 0 })
+  })
+})
+
+describe('danceAt', () => {
+  const beat = 60 / 120 // seconds per beat at 120 bpm
+  test('the head dips on every beat and comes back up between beats', () => {
+    const on = danceAt(0, 120, 1)
+    const off = danceAt(beat / 2, 120, 1)
+    expect(on.fy).toBeLessThan(-0.2)
+    expect(off.fy).toBeCloseTo(0, 5)
+    expect(danceAt(3 * beat, 120, 1).fy).toBeCloseTo(on.fy, 5)
+  })
+  test('sways to one side and back over two beats', () => {
+    const right = danceAt(beat, 120, 1)
+    const left = danceAt(3 * beat, 120, 1)
+    expect(right.fx).toBeGreaterThan(0.2)
+    expect(left.fx).toBeCloseTo(-right.fx, 5)
+    expect(danceAt(5 * beat, 120, 1).fx).toBeCloseTo(right.fx, 5)
+    expect(Math.abs(right.tilt)).toBeGreaterThan(0)
+  })
+  test('is still when bpm is off, and scales with sway', () => {
+    expect(danceAt(1.3, 0, 1)).toEqual({ fx: 0, fy: 0, tilt: 0, body: 0 })
+    const full = danceAt(beat, 120, 1)
+    const half = danceAt(beat, 120, 0.5)
+    expect(half.fx).toBeCloseTo(full.fx / 2, 5)
+    expect(half.tilt).toBeCloseTo(full.tilt / 2, 5)
+    expect(danceAt(beat, 120, 0)).toEqual({ fx: 0, fy: 0, tilt: 0, body: 0 })
   })
 })

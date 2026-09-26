@@ -162,3 +162,21 @@ export function eyeTarget(mood, hasSmile, since) {
   if (hasSmile && mood === 'happy' && since < SMILE_S) return { eye: 0, smile: 1 }
   return { eye: EYES[mood] ?? EYES.neutral, smile: 0 }
 }
+
+/**
+ * Dancing to a tempo: the head dips on every beat and sways side to side every two beats.
+ * `t` is seconds since the beat anchor. fx/fy are focus offsets added to the idle wander;
+ * tilt and body are degrees for ParamAngleZ and ParamBodyAngleZ. All zero when bpm is 0.
+ */
+export function danceAt(t, bpm, sway) {
+  if (!bpm || !sway) return { fx: 0, fy: 0, tilt: 0, body: 0 }
+  const beat = (t * bpm) / 60
+  const bob = Math.cos(Math.PI * beat) ** 2 // 1 on the beat, 0 between
+  const side = Math.sin((Math.PI * beat) / 2) // one side and back over two beats
+  return {
+    fx: side * 0.3 * sway,
+    fy: -bob * 0.25 * sway,
+    tilt: Math.sin((Math.PI * beat) / 2 + 0.6) * 8 * sway,
+    body: Math.sin((Math.PI * beat) / 2 + 0.3) * 4 * sway,
+  }
+}

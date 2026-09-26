@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, eyeTarget, fitModel, mouthAt } from './core.js'
+import { clampTransform, danceAt, eyeTarget, fitModel, mouthAt } from './core.js'
 
 const q = new URLSearchParams(location.search)
 const editable = q.get('edit') === '1'
@@ -40,13 +40,15 @@ const lerp = (a, b, k) => a + (b - a) * k
 
 let model = null, pidx = {}
 let transform = { x: 0, y: 0, scale: 1 }
-let scene = { motion: { sway: 1, speed: 1, blink: 3.7 }, captions: { show: true, size: 22 }, background: { color: '', image: '' }, screen: { x: -0.55, y: -0.15, w: 0.4 } }
+let scene = { motion: { sway: 1, speed: 1, blink: 3.7, bpm: 0 }, captions: { show: true, size: 22 }, background: { color: '', image: '' }, screen: { x: -0.55, y: -0.15, w: 0.4 } }
 let imageTimer
 let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
 let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
+// Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
+let beatT0 = performance.now(), tilt = 0, bodyTilt = 0
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
 let mouth = 0, analyser = null, ac = null
 // Lipsync: a clip's mouth track (from the voice service) is read at the audio clock; the
@@ -56,6 +58,7 @@ const muted = q.get('mute') === '1'
 const pinned = {} // param id -> value from the console's sliders; applied last, released with null
 
 const set = (id, v) => { const i = pidx[id]; if (i !== undefined) model.internalModel.coreModel.setParameterValueByIndex(i, v) }
+const add = (id, v) => { const i = pidx[id], c = model.internalModel.coreModel; if (i !== undefined && v) c.setParameterValueByIndex(i, c.getParameterValueByIndex(i) + v) }
 
 async function load(url) {
   if (model) { app.stage.removeChild(model); model.destroy(); model = null }
@@ -83,6 +86,8 @@ async function load(url) {
     if (state === 'thinking') { fx += 0.35; fy += 0.3 }          // glance up and away
     if (state === 'working') { fy -= 0.25; fx += Math.sin(t * 6) * 0.05 } // head down, busy
     if (nodT >= 0) { fy += Math.sin(nodT * Math.PI * 2) * -0.5; nodT += dt * 2.2; if (nodT > 1) nodT = -1 }
+    const d = danceAt((now - beatT0) / 1000, scene.motion.bpm, sway)
+    fx += d.fx; fy += d.fy
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
     const driven = expressions[mood] ? 'neutral' : mood
@@ -114,6 +119,9 @@ async function load(url) {
         m.internalModel.coreModel.setParameterValueByIndex(i, v)
       }
     }
+    // Head and body tilt ride on top of what the focus controller wrote (it sets AngleZ too).
+    tilt = lerp(tilt, d.tilt, 0.3); bodyTilt = lerp(bodyTilt, d.body, 0.3)
+    add('ParamAngleZ', tilt); add('ParamBodyAngleZ', bodyTilt)
     set('Param', poseOn) // chb119's pose toggle; harmless on models without it
     for (const id in pinned) set(id, pinned[id])
   })
@@ -187,6 +195,7 @@ function apply(cue) {
 }
 
 function applyScene(sc) {
+  beatT0 = performance.now()
   scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background }, screen: { ...scene.screen, ...sc.screen } }
   captionEl.style.fontSize = `${scene.captions.size}px`
   if (!showCaptions()) captionEl.style.display = 'none'
