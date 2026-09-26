@@ -299,7 +299,7 @@ describe('discovery', () => {
     expect(t.name).toBe('test')
     expect(t.talents).toEqual(['test'])
     expect(t.transform).toEqual({ x: 0, y: 0, scale: 1 })
-    expect(t.scene.motion).toEqual({ sway: 1, speed: 1, blink: 3.7 })
+    expect(t.scene.motion).toEqual({ sway: 1, speed: 1, blink: 3.7, bpm: 0 })
     expect(t.muted).toBe(false)
   })
   test('GET /health reports egirl reachability and mute', async () => {
@@ -368,6 +368,19 @@ describe('layout and scene', () => {
   test('POST /transform rejects non-numbers', async () => {
     expect((await post('/transform', { x: 'left' })).status).toBe(400)
   })
+  test('POST /scene carries a dance tempo, clamped, and rejects a non-number', async () => {
+    await post('/scene', { motion: { bpm: 128 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(128)
+    expect(readOverrides('test', overridesDir).scene?.motion?.bpm).toBe(128)
+    await post('/scene', { motion: { bpm: 999 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(220)
+    await post('/scene', { motion: { bpm: 12 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(40)
+    await post('/scene', { motion: { bpm: -5 } })
+    expect((await get('/talent')).scene.motion.bpm).toBe(0)
+    expect((await post('/scene', { motion: { bpm: 'fast' } })).status).toBe(400)
+    await post('/scene', { motion: { bpm: 0 } })
+  })
   test('POST /scene merges, broadcasts and persists', async () => {
     const page = await client()
     await post('/scene', { motion: { sway: 0.4 }, captions: { size: 30 } })
@@ -376,7 +389,7 @@ describe('layout and scene', () => {
       motion: { sway: number; speed: number }
       captions: { size: number; show: boolean }
     }
-    expect(scene.motion).toEqual({ sway: 0.4, speed: 1, blink: 3.7 })
+    expect(scene.motion).toEqual({ sway: 0.4, speed: 1, blink: 3.7, bpm: 0 })
     expect(scene.captions).toEqual({ show: true, size: 30 })
     expect(readOverrides('test', overridesDir).scene?.motion?.sway).toBe(0.4)
     await post('/scene', { background: { color: '#123456' } })

@@ -21,6 +21,7 @@ import {
 import { findExpressions, findModels } from './models'
 import { perform, type Stage, speak } from './performer'
 import {
+  clampBpm,
   DIR,
   directorFrom,
   HOTKEY_ACTIONS,
@@ -394,13 +395,16 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           return json({ ok: true, ...t })
         }
         if (path === '/scene') {
+          const bpm = (body.motion as { bpm?: unknown } | undefined)?.bpm
+          if (bpm !== undefined && typeof bpm !== 'number')
+            return json({ error: 'motion.bpm must be a number (0 = off)' }, 400)
           const cur = sceneFrom(overrides)
           const pick = <K extends keyof Scene>(k: K): Scene[K] =>
             typeof body[k] === 'object' && body[k]
               ? { ...cur[k], ...(body[k] as Partial<Scene[K]>) }
               : cur[k]
           overrides.scene = {
-            motion: pick('motion'),
+            motion: { ...pick('motion'), bpm: clampBpm(pick('motion').bpm) },
             captions: pick('captions'),
             background: pick('background'),
             screen: pick('screen'),
