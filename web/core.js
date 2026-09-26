@@ -93,6 +93,17 @@ export function riskyTools(tools) {
   return RISKY.filter((k) => tools[k] === true).sort()
 }
 
+/**
+ * What an egirl can hand work to beyond its own tools, from /info: peers (delegation) and MCP
+ * servers (their tools never appear in `tools`). Older egirls without `mcp` report nothing.
+ */
+export function riskyReach(info) {
+  const out = []
+  if (info?.peers > 0) out.push(`peers: ${info.peers}`)
+  if (Array.isArray(info?.mcp) && info.mcp.length) out.push(`mcp: ${info.mcp.join(', ')}`)
+  return out
+}
+
 /** Go-live checklist. Each item: { key, label, ok, detail }. */
 export function readiness({ health, egirl, modelLoaded }) {
   const items = []
@@ -100,8 +111,8 @@ export function readiness({ health, egirl, modelLoaded }) {
   items.push({ key: 'server', label: 'Stage server', ok: !!health?.ok, detail: health?.ok ? 'reachable' : 'unreachable' })
   items.push({ key: 'voice', label: 'Voice service', ok: voiceOk, detail: voiceOk ? `${health.voice.device ?? 'up'}${health.voice.rvc?.length ? `, rvc: ${health.voice.rvc.join(', ')}` : ''}` : (health?.voice?.error ?? 'down') })
   items.push({ key: 'egirl', label: 'egirl instance', ok: !!egirl?.ok, detail: egirl?.ok ? (egirl.info?.model ?? 'reachable') : (egirl?.error ?? 'unreachable') })
-  const risky = riskyTools(egirl?.info?.tools)
-  items.push({ key: 'tools', label: 'Tools locked down', ok: !!egirl?.ok && risky.length === 0, detail: !egirl?.ok ? 'unknown' : risky.length ? `enabled: ${risky.join(', ')}` : 'no world-acting tools enabled' })
+  const risky = [...riskyTools(egirl?.info?.tools), ...riskyReach(egirl?.info)]
+  items.push({ key: 'tools', label: 'Tools locked down', ok: !!egirl?.ok && risky.length === 0, detail: !egirl?.ok ? 'unknown' : risky.length ? `enabled: ${risky.join(', ')}` : 'no world-acting tools, peers or MCP servers' })
   items.push({ key: 'page', label: 'Render page connected', ok: (health?.pages ?? 0) > 0, detail: `${health?.pages ?? 0} page(s)` })
   items.push({ key: 'model', label: 'Model loaded', ok: !!modelLoaded, detail: modelLoaded ? 'ok' : 'not loaded' })
   if (health?.twitch) items.push({ key: 'twitch', label: 'Twitch chat', ok: !!health.twitch.connected, detail: health.twitch.connected ? 'connected' : 'reconnecting' })

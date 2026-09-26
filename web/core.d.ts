@@ -25,5 +25,6 @@ export interface Reel { duration: number; clips: { t0: number; t1: number; text:
 export function clipAt(reel: Reel, t: number): Reel['clips'][number] | null
 export function cuesBetween(reel: Reel, from: number, to: number): Reel['cues'][number]['cue'][]
 export function mouthAt(track: MouthTrack | null | undefined, t: number): { open: number; form: number } | null
+export function riskyReach(info: { peers?: number; mcp?: string[] } | null | undefined): string[]
 export function eyeTarget(mood: string, hasSmile: boolean, since: number): { eye: number; smile: number }
 export function danceAt(t: number, bpm: number, sway: number): { fx: number; fy: number; tilt: number; body: number }

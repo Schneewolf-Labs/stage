@@ -37,7 +37,7 @@ const voice = Bun.serve({
 })
 const egirl = Bun.serve({
   port: 0,
-  fetch: () => Response.json({ name: 'e', tools: { exec: true } }),
+  fetch: () => Response.json({ name: 'e', tools: { exec: true }, peers: 1, mcp: ['witchgrid'] }),
 })
 const wald = Bun.serve({
   port: 0,
@@ -80,6 +80,7 @@ describe('doctor', () => {
     expect(by['talent t: egirl'].ok).toBe(true)
     expect(by['talent t: tools'].ok).toBe(false)
     expect(by['talent t: tools'].detail).toMatch(/exec/)
+    expect(by['talent t: tools'].detail).toMatch(/peers: 1.*mcp: witchgrid/)
     expect(r.every((c) => typeof c.detail === 'string')).toBe(true)
     expect(by['talent t: voice round-trip'].ok).toBe(true)
     expect(by['talent t: voice round-trip'].detail).toMatch(/100%/)
