@@ -23,4 +23,5 @@ export function downsample(samples: Float32Array, from: number, to: number): Flo
 export interface MouthTrack { rate: number; frames: [number, number][] }
 export function mouthAt(track: MouthTrack | null | undefined, t: number): { open: number; form: number } | null
 export function riskyReach(info: { peers?: number; mcp?: string[] } | null | undefined): string[]
+export function eyeTarget(mood: string, hasSmile: boolean, since: number): { eye: number; smile: number }
 export function danceAt(t: number, bpm: number, sway: number): { fx: number; fy: number; tilt: number; body: number }

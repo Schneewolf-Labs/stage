@@ -39,6 +39,18 @@ const egirl = Bun.serve({
   port: 0,
   fetch: () => Response.json({ name: 'e', tools: { exec: true }, peers: 1, mcp: ['witchgrid'] }),
 })
+const wald = Bun.serve({
+  port: 0,
+  fetch: (req) =>
+    new URL(req.url).pathname === '/agents/kira'
+      ? Response.json({
+          slug: 'kira',
+          endpoint_url: `http://127.0.0.1:${egirl.port}`,
+          protocol: 'egirl-peer/1',
+          status: 'active',
+        })
+      : Response.json({ detail: 'not found' }, { status: 404 }),
+})
 
 const cfg = (model: string, rvc?: string, kokoro = 'af_heart'): StageConfig => ({
   server: { host: '127.0.0.1', port: 3100, models_dir: dir },
@@ -95,6 +107,19 @@ describe('doctor', () => {
     expect(by['talent t: model'].ok).toBe(false)
     expect(by['talent t: rvc model'].ok).toBe(false)
     expect(by['talent t: egirl'].ok).toBe(false)
+  })
+  test('resolves a wald-named egirl and reports where it went, or why it could not', async () => {
+    const c = { ...cfg('ok/ok.model3.json'), wald: { url: `http://127.0.0.1:${wald.port}` } }
+    const t = c.talents.t
+    if (t) Object.assign(t, { egirl_url: '', egirl: 'kira' })
+    let by = Object.fromEntries((await doctor(c)).map((x) => [x.name, x]))
+    expect(by['talent t: egirl'].ok).toBe(true)
+    expect(by['talent t: egirl'].detail).toBe(`http://127.0.0.1:${egirl.port} (wald: kira)`)
+    if (t) Object.assign(t, { egirl_url: '', egirl: 'ghost' })
+    by = Object.fromEntries((await doctor(c)).map((x) => [x.name, x]))
+    expect(by['talent t: egirl'].ok).toBe(false)
+    expect(by['talent t: egirl'].detail).toMatch(/"ghost" is not registered/)
+    expect(by['talent t: tools'].detail).toMatch(/not reachable/)
   })
 })
 

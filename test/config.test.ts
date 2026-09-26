@@ -57,6 +57,51 @@ nick = "bot"
     ).toThrow(/both nick and token/)
   })
 
+  test('a talent can name its egirl in wald instead of pinning a URL', () => {
+    const cfg = parseConfig(`${TOML}
+[wald]
+url = "http://wald:8000/"
+[talents.c]
+egirl = "kira"
+model = "c/c.model3.json"
+`)
+    expect(cfg.wald).toEqual({ url: 'http://wald:8000' })
+    expect(cfg.talents.c?.egirl).toBe('kira')
+    expect(cfg.talents.c?.egirl_url).toBe('')
+    expect(cfg.talents.a?.egirl).toBeUndefined()
+    expect(parseConfig(TOML).wald).toBeUndefined()
+  })
+
+  test('a pinned egirl_url wins over a wald name', () => {
+    const cfg = parseConfig(`${TOML}
+[wald]
+url = "http://wald:8000"
+[talents.c]
+egirl = "kira"
+egirl_url = "http://pinned:3000"
+model = "c/c.model3.json"
+`)
+    expect(cfg.talents.c?.egirl_url).toBe('http://pinned:3000')
+    expect(cfg.talents.c?.egirl).toBeUndefined()
+  })
+
+  test('a wald name needs a [wald] table, and a talent needs one of the two', () => {
+    expect(() =>
+      parseConfig(`${TOML}
+[talents.c]
+egirl = "kira"
+model = "c/c.model3.json"
+`),
+    ).toThrow(/talents\.c\.egirl needs a \[wald\] table/)
+    expect(() =>
+      parseConfig(`${TOML}
+[talents.c]
+model = "c/c.model3.json"
+`),
+    ).toThrow(/talents\.c: set egirl_url, or egirl/)
+    expect(() => parseConfig(`${TOML}\n[wald]\n`)).toThrow(/wald\.url/)
+  })
+
   test('first talent is the default', () => {
     const cfg = parseConfig(TOML)
     expect(pickTalent(cfg).name).toBe('a')
