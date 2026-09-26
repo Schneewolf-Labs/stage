@@ -36,6 +36,7 @@ import { ScriptRunner } from './script'
 import { startTwitch, type TwitchHandle } from './twitch'
 import type { ConsoleEvent, StageCue, StageReport } from './types'
 import { mouth, transcribe, voiceHealth, wavSeconds } from './voice'
+import { resolveTalent } from './wald'
 
 const WEB_DIR = resolve(import.meta.dir, '../web')
 const MAX_CLIPS = 64
@@ -143,11 +144,22 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
   }
   const opts = { voiceUrl: cfg.voice.url, talent, stage, log }
   let turn: Promise<unknown> = Promise.resolve()
+  // A Wald-named talent whose egirl stopped answering may have moved: ask Wald again, in the
+  // turn queue, so the next turn goes to the new address.
+  const relocate = async (): Promise<void> => {
+    if (!talent.egirl || (await egirlUp(talent))) return
+    const before = talent.egirl_url
+    await resolveTalent(cfg, talent)
+      .then(
+        (moved) => moved && log(`egirl ${talent.egirl} moved: ${before} -> ${talent.egirl_url}`),
+      )
+      .catch((e: Error) => log(e.message))
+  }
   // One turn at a time: the talent has one mouth. Queue behind any turn in progress.
   const runTurn = async (message: string): Promise<string> => {
     inFlight++
     const p = turn.then(() => perform(opts, message))
-    turn = p.catch(() => {})
+    turn = p.catch(relocate)
     try {
       return await p
     } finally {

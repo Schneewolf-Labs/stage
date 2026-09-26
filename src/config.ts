@@ -18,7 +18,10 @@ export interface TwitchConfig {
 
 export interface TalentConfig {
   name: string
+  /** Empty until resolved when the talent names its egirl in Wald instead. */
   egirl_url: string
+  /** Wald agent slug; set only when the URL comes from Wald (a pinned egirl_url wins). */
+  egirl?: string
   egirl_token?: string
   session: string
   model: string
@@ -33,6 +36,8 @@ export interface TalentConfig {
 export interface StageConfig {
   server: { host: string; port: number; models_dir: string }
   voice: { url: string }
+  /** Agent registry that turns a talent's `egirl` name into its egirl_url. */
+  wald?: { url: string }
   talents: Record<string, TalentConfig>
 }
 
@@ -68,6 +73,22 @@ function strList(
   return v.map((x) => x.toLowerCase())
 }
 
+/**
+ * A pinned egirl_url wins over a Wald name, the same "config wins" rule egirl applies to its
+ * peers: someone pinned that URL for a reason.
+ */
+function parseEgirl(
+  t: Record<string, unknown>,
+  w: string,
+  hasWald: boolean,
+): { egirl_url: string; egirl?: string } {
+  if (t.egirl_url !== undefined) return { egirl_url: str(t, 'egirl_url', w).replace(/\/$/, '') }
+  if (t.egirl === undefined) throw new Error(`${w}: set egirl_url, or egirl (a Wald agent slug)`)
+  const egirl = str(t, 'egirl', w)
+  if (!hasWald) throw new Error(`${w}.egirl needs a [wald] table with the registry url`)
+  return { egirl_url: '', egirl }
+}
+
 function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
   if (raw === undefined) return undefined
   const w = `talents.${name}.twitch`
@@ -94,6 +115,9 @@ export function parseConfig(text: string): StageConfig {
   const server = isObj(raw.server) ? raw.server : {}
   const voice = isObj(raw.voice) ? raw.voice : {}
   const talentsRaw = isObj(raw.talents) ? raw.talents : {}
+  const wald = isObj(raw.wald)
+    ? { url: str(raw.wald, 'url', 'wald').replace(/\/+$/, '') }
+    : undefined
   const talents: Record<string, TalentConfig> = {}
   for (const [name, t] of Object.entries(talentsRaw)) {
     if (!isObj(t)) throw new Error(`talents.${name} must be a table`)
@@ -103,7 +127,7 @@ export function parseConfig(text: string): StageConfig {
     const twitch = parseTwitch(t.twitch, name)
     talents[name] = {
       name,
-      egirl_url: str(t, 'egirl_url', w).replace(/\/$/, ''),
+      ...parseEgirl(t, w, !!wald),
       ...(token ? { egirl_token: token } : {}),
       session: str(t, 'session', w, `stage:${name}`),
       model: str(t, 'model', w),
@@ -123,6 +147,7 @@ export function parseConfig(text: string): StageConfig {
       models_dir: resolve(str(server, 'models_dir', 'server')),
     },
     voice: { url: str(voice, 'url', 'voice', 'http://127.0.0.1:8100').replace(/\/$/, '') },
+    ...(wald ? { wald } : {}),
     talents,
   }
 }
