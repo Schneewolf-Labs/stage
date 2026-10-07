@@ -1,4 +1,5 @@
 import type { TalentConfig } from './config'
+import { sayAs } from './say-as'
 
 /** Per-clip lipsync track: `rate` frames per second of [openness 0..1, form -1..1]. */
 export interface MouthTrack {
@@ -34,7 +35,7 @@ export async function synthesize(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      text,
+      text: sayAs(text, talent.say_as),
       voice: talent.voice,
       rvc: talent.rvc ?? null,
       speed: talent.speed,
