@@ -73,7 +73,7 @@ describe('persist', () => {
   test('sceneFrom fills defaults under partial overrides', () => {
     expect(sceneFrom({})).toEqual(DEFAULT_SCENE)
     const s = sceneFrom({ scene: { captions: { size: 30 } } })
-    expect(s.captions).toEqual({ show: true, size: 30 })
+    expect(s.captions).toEqual({ ...DEFAULT_SCENE.captions, size: 30 })
     expect(s.motion).toEqual(DEFAULT_SCENE.motion)
   })
 
@@ -84,15 +84,23 @@ describe('persist', () => {
 })
 
 describe('persist: director and screen', () => {
-  test('sceneFrom carries screen placement and background image defaults', () => {
+  test('sceneFrom gives the screen and captions boxes, no frames, and the background', () => {
     const s = sceneFrom({})
-    expect(s.screen).toEqual({ x: -0.55, y: -0.15, w: 0.4 })
+    expect(s.screen).toEqual(DEFAULT_SCENE.screen)
+    expect(Object.keys(s.screen).sort()).toEqual(['h', 'show', 'w', 'x', 'y'])
+    expect(s.captions).toMatchObject({ show: true, size: 22 })
+    expect(typeof s.captions.h).toBe('number')
+    expect(s.frames).toEqual([])
     expect(s.background).toEqual({ color: '', image: '' })
-    expect(sceneFrom({ scene: { screen: { w: 0.6 } } }).screen).toEqual({
-      x: -0.55,
-      y: -0.15,
-      w: 0.6,
-    })
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }
+    expect(sceneFrom({ scene: { screen: box } }).screen).toMatchObject(box)
+  })
+  test('a screen saved before widgets (centre in -1..1, width only) keeps its centre and width', () => {
+    const s = sceneFrom({ scene: { screen: { x: 0.665, y: 0.108, w: 0.165 } } }).screen
+    expect(s.w).toBeCloseTo(0.165)
+    expect(s.x + s.w / 2).toBeCloseTo(0.8325)
+    expect(s.y + s.h / 2).toBeCloseTo(0.554)
+    expect(s.show).toBe(true)
   })
   test('directorFrom fills defaults and is off unless saved on', () => {
     expect(directorFrom({})).toEqual({

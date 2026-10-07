@@ -99,16 +99,16 @@
       <h3>Captions</h3>
       <label class="field row"><input type="checkbox" id="capShow" checked><span>Show captions on the render page</span></label>
       <label class="field range"><span>Size <b id="capSizeVal">22</b>px</span><input type="range" id="capSize" min="12" max="48" step="1" value="22"></label>
-      <h3>Screen <span class="hint">where pictures appear</span></h3>
-      <label class="field range"><span>X <b id="sxVal">-0.55</b></span><input type="range" id="sx" min="-1" max="1" step="0.01" value="-0.55"></label>
-      <label class="field range"><span>Y <b id="syVal">-0.15</b></span><input type="range" id="sy" min="-1" max="1" step="0.01" value="-0.15"></label>
-      <label class="field range"><span>Width <b id="swVal">40</b>%</span><input type="range" id="sw" min="0.1" max="1" step="0.01" value="0.4"></label>
+      <h3>Widgets <span class="hint">drag them in the preview; the corner resizes</span></h3>
+      <label class="field row"><input type="checkbox" id="screenShow" checked><span>Screen: show the pictures she draws</span></label>
       <div class="copyrow"><button class="btn ghost" id="btnTestImage">Show test picture</button><button class="btn ghost" id="btnClearImage">Clear</button></div>
+      <div id="frameList"></div>
+      <div class="copyrow"><input id="frameUrl" placeholder="http://… a page to show in a frame"><button class="btn ghost" id="btnFrameAdd">Add frame</button></div>
       <h3>Background</h3>
       <div class="copyrow"><input type="color" id="bgColor" value="#1a1023"><button class="btn ghost" id="btnBgApply">Apply</button><button class="btn ghost" id="btnBgClear" title="Transparent (for OBS)">Transparent</button></div>
       <label class="field"><span>Image (path under models_dir, or a URL)</span><input id="bgImage" placeholder="backgrounds/room.png"></label>
       <div class="copyrow"><button class="btn ghost" id="btnBgImage">Set image</button><button class="btn ghost" id="btnBgImageClear">No image</button></div>
-      <h3>Presets <span class="hint">placement + motion + captions + background + screen</span></h3>
+      <h3>Presets <span class="hint">placement + motion + captions + background + widgets</span></h3>
       <div class="copyrow"><input id="presetName" placeholder="name, e.g. game"><button class="btn ghost" id="btnPresetSave">Save current</button></div>
       <div class="preset-list" id="presetList"><div class="empty">No presets yet.</div></div>
     </section>

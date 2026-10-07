@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, stringify } from 'smol-toml'
+import { clampBox, cleanFrames, legacyScreenBox } from '../web/core.js'
 import type { TalentConfig } from './config'
 
 /** Per-model placement on the 1920x1080 canvas: offsets as a fraction of the canvas, scale x. */
@@ -10,17 +11,34 @@ export interface Transform {
   scale: number
 }
 
+/** A widget's place: top-left corner and size, as fractions of the canvas (0..1). */
+export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** A web page in a box on the scene: a gallery, a chat embed, a now-playing panel. */
+export interface Frame extends Box {
+  id: string
+  url: string
+  show: boolean
+}
+
 export interface Scene {
   /**
    * Idle motion: sway amplitude and speed multipliers, blink interval seconds, and a dance
    * tempo (beats per minute, 0 = off) that bobs the head on the beat while music plays.
    */
   motion: { sway: number; speed: number; blink: number; bpm: number }
-  captions: { show: boolean; size: number }
+  /** The spoken line, at the bottom of its box. */
+  captions: Box & { show: boolean; size: number }
   /** Colour, and/or an image path under models_dir (served at /models/) or a URL. */
   background: { color: string; image: string }
-  /** Where pictures the talent shows go: centre as screen fractions, width as a fraction. */
-  screen: { x: number; y: number; w: number }
+  /** Where pictures the talent shows go; a picture fits inside the box. */
+  screen: Box & { show: boolean }
+  frames: Frame[]
 }
 
 /** The director prompts the talent on a cadence while it is idle: game commentary, check-ins. */
@@ -65,7 +83,14 @@ export interface Overrides {
   speed?: number
   model?: string
   transforms?: Record<string, Transform>
-  scene?: { [K in keyof Scene]?: Partial<Scene[K]> }
+  scene?: {
+    motion?: Partial<Scene['motion']>
+    captions?: Partial<Scene['captions']>
+    background?: Partial<Scene['background']>
+    /** A box, or { x, y, w } (centre in -1..1) as saved before widgets. */
+    screen?: Partial<Scene['screen']>
+    frames?: Frame[]
+  }
   director?: Partial<Director>
   presets?: Record<string, Preset>
   hotkeys?: Hotkey[]
@@ -73,9 +98,10 @@ export interface Overrides {
 
 export const DEFAULT_SCENE: Scene = {
   motion: { sway: 1, speed: 1, blink: 3.7, bpm: 0 },
-  captions: { show: true, size: 22 },
+  captions: { show: true, size: 22, x: 0.15, y: 0.78, w: 0.7, h: 0.16 },
   background: { color: '', image: '' },
-  screen: { x: -0.55, y: -0.15, w: 0.4 },
+  screen: { ...legacyScreenBox({ x: -0.55, y: -0.15, w: 0.4 }), show: true },
+  frames: [],
 }
 
 export const DEFAULT_DIRECTOR: Director = {
@@ -126,13 +152,25 @@ export function clampBpm(v: unknown): number {
   return Math.min(220, Math.max(40, v))
 }
 
+function screenFrom(s: Partial<Scene['screen']> | undefined): Scene['screen'] {
+  const show = s?.show ?? true
+  if (s && s.h === undefined && (s.x !== undefined || s.y !== undefined || s.w !== undefined))
+    return { ...legacyScreenBox({ x: -0.55, y: -0.15, w: 0.4, ...s }), show }
+  return { ...clampBox({ ...DEFAULT_SCENE.screen, ...s }, DEFAULT_SCENE.screen), show }
+}
+
 export function sceneFrom(o: Overrides): Scene {
   const motion = { ...DEFAULT_SCENE.motion, ...o.scene?.motion }
   return {
     motion: { ...motion, bpm: clampBpm(motion.bpm) },
-    captions: { ...DEFAULT_SCENE.captions, ...o.scene?.captions },
+    captions: {
+      show: o.scene?.captions?.show ?? DEFAULT_SCENE.captions.show,
+      size: o.scene?.captions?.size ?? DEFAULT_SCENE.captions.size,
+      ...clampBox({ ...DEFAULT_SCENE.captions, ...o.scene?.captions }, DEFAULT_SCENE.captions),
+    },
     background: { ...DEFAULT_SCENE.background, ...o.scene?.background },
-    screen: { ...DEFAULT_SCENE.screen, ...o.scene?.screen },
+    screen: screenFrom(o.scene?.screen),
+    frames: cleanFrames(o.scene?.frames ?? []),
   }
 }
 
