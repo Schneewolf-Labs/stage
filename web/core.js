@@ -68,6 +68,63 @@ export function clampTransform(t) {
   return { x: clamp(n(t?.x, 0), -1, 1), y: clamp(n(t?.y, 0), -1, 1), scale: clamp(n(t?.scale, 1), 0.1, 4) }
 }
 
+/* ---- widgets: boxes as fractions of the canvas, top-left corner and size, 0..1 ---- */
+
+const MIN_BOX = 0.03
+const MAX_FRAMES = 8
+const DEFAULT_FRAME_BOX = { x: 0.02, y: 0.5, w: 0.25, h: 0.45 }
+const r4 = (v) => Math.round(v * 1e4) / 1e4
+const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+
+/** A box that stays on the canvas and is at least a little big; junk fields come from `fallback`. */
+export function clampBox(b, fallback = DEFAULT_FRAME_BOX) {
+  const w = r4(clamp(num(b?.w, fallback.w), MIN_BOX, 1))
+  const h = r4(clamp(num(b?.h, fallback.h), MIN_BOX, 1))
+  return { x: r4(clamp(num(b?.x, fallback.x), 0, 1 - w)), y: r4(clamp(num(b?.y, fallback.y), 0, 1 - h)), w, h }
+}
+
+/** Slide a box by a fraction of the canvas, keeping its size. */
+export function moveBox(b, dx, dy) {
+  return clampBox({ ...b, x: b.x + dx, y: b.y + dy }, b)
+}
+
+/** Drag a box's bottom-right corner. */
+export function resizeBox(b, dw, dh) {
+  return clampBox({ ...b, w: Math.min(b.w + dw, 1 - b.x), h: Math.min(b.h + dh, 1 - b.y) }, b)
+}
+
+/**
+ * A screen saved before widgets: centre in -1..1 and a width. Keep both; the height is what a
+ * square picture took on a 16:9 canvas, which is what that screen showed.
+ */
+export function legacyScreenBox(s) {
+  const w = num(s?.w, 0.4)
+  const h = Math.min(1, (w * 16) / 9)
+  return clampBox({ x: 0.5 + num(s?.x, 0) / 2 - w / 2, y: 0.5 + num(s?.y, 0) / 2 - h / 2, w, h })
+}
+
+/** Frames (a URL in a box) from untrusted input: http(s) only, unique ids, shown by default. */
+export function cleanFrames(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  for (const f of list) {
+    if (out.length >= MAX_FRAMES) break
+    if (!f || typeof f !== 'object' || typeof f.url !== 'string' || !/^https?:\/\//.test(f.url)) continue
+    let id = typeof f.id === 'string' && f.id.trim() ? f.id.trim().slice(0, 40) : `frame-${out.length + 1}`
+    while (out.some((o) => o.id === id)) id = `${id}-${out.length + 1}`
+    out.push({ id, url: f.url.slice(0, 2000), show: f.show !== false, ...clampBox(f) })
+  }
+  return out
+}
+
+/** The /scene body for a widget dragged to `box`: `screen`, `captions`, or `frame:<id>`. */
+export function widgetPatch(scene, key, box) {
+  if (key === 'screen' || key === 'captions') return { [key]: box }
+  const id = key.startsWith('frame:') ? key.slice('frame:'.length) : null
+  if (!id || !scene.frames.some((f) => f.id === id)) return {}
+  return { frames: scene.frames.map((f) => (f.id === id ? { ...f, ...box } : f)) }
+}
+
 /** Pixel placement for a model: fit to 95% of the screen height at identity, then offset/scale. */
 export function fitModel(screen, model, t) {
   const base = Math.min(screen.w / model.w, screen.h / model.h) * 0.95

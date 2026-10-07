@@ -70,7 +70,8 @@ when it failed; a turn that parks on a question for a human says so. Moods and g
 mid-sentence.
 
 Also in the console: **Scene** (drag the model in the preview and scroll to scale, saved per
-model; idle sway, blink rate, caption size, background colour), **Brain** (the talent's egirl
+model; idle sway, blink rate, caption size, background colour; widgets: the picture screen, the
+caption box and any number of web-page *frames*, each dragged and resized in the preview), **Brain** (the talent's egirl
 instance: model, context use, which tools are enabled with the world-acting ones flagged,
 thinking level, abort, compact or forget the session, and answer the questions she parks on for
 a human), a **kill switch** that silences the talent instantly, a monitor toggle
@@ -84,7 +85,7 @@ persisted, with a run-once button), and a **script** reader for narration writte
 (tutorials, intros): one line per row, cue tags honoured, a pause between lines, stoppable.
 
 **Pictures.** A markdown image or a bare image URL in a reply is not read aloud; it is shown on
-the scene's *screen*, a placeable area next to the model, with its alt text as caption. Anything
+the scene's *screen*, a box you place and size in the preview, with its alt text as caption. Anything
 else can put a picture there with `POST /image`. This is how an image-generating talent shows
 her work on stream.
 
@@ -147,7 +148,7 @@ chat, cue tags stripped.
 | POST | `/model` | `{model}` | hot-swap the Live2D model (path under models_dir) on every page |
 | POST | `/voice` | `{voice?, rvc?, pitch?, speed?}` | live voice settings for the next sentence, saved to stage.d |
 | POST | `/transform` | `{x?, y?, scale?}` | place the model on the canvas (fractions of the screen, scale x), saved per model |
-| POST | `/scene` | `{motion?, captions?, background?}` | idle motion, caption style, background, saved |
+| POST | `/scene` | `{motion?, captions?, background?, screen?, frames?}` | idle motion, captions, background and widgets (boxes `{x, y, w, h}` as canvas fractions; `frames` is the full list of `{url, x, y, w, h, show}`), saved |
 | POST | `/mute` | `{on}` | kill switch: stop now and synthesize nothing until unmuted |
 | POST | `/script` | `{lines, gap_ms?}` | read lines in order; `/script/stop` ends it; progress as `script` events |
 | POST | `/director` | `{enabled?, interval_s?, prompt?}` | the auto-prompt loop, saved; `/director/run` fires it once |

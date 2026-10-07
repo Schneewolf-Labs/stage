@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  clampBox,
   clampTransform,
+  cleanFrames,
   clipAt,
   clipStats,
   contextUse,
@@ -10,11 +12,15 @@ import {
   encodeWav,
   eyeTarget,
   fitModel,
+  legacyScreenBox,
   mouthAt,
+  moveBox,
   readiness,
+  resizeBox,
   riskyReach,
   riskyTools,
   turnReducer,
+  widgetPatch,
 } from '../web/core.js'
 
 describe('turnReducer', () => {
@@ -398,5 +404,73 @@ describe('danceAt', () => {
     expect(half.fx).toBeCloseTo(full.fx / 2, 5)
     expect(half.tilt).toBeCloseTo(full.tilt / 2, 5)
     expect(danceAt(beat, 120, 0)).toEqual({ fx: 0, fy: 0, tilt: 0, body: 0 })
+  })
+})
+
+describe('widget boxes', () => {
+  test('clampBox keeps a box on the canvas, at least a little big, and fills junk from a fallback', () => {
+    expect(clampBox({ x: 0.9, y: -0.2, w: 0.3, h: 0.3 })).toEqual({ x: 0.7, y: 0, w: 0.3, h: 0.3 })
+    expect(clampBox({ x: 0.5, y: 0.5, w: 0.001, h: 2 })).toEqual({ x: 0.5, y: 0, w: 0.03, h: 1 })
+    const fb = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }
+    expect(clampBox({ x: 'a', y: Number.NaN }, fb)).toEqual(fb)
+  })
+
+  test('moveBox slides without changing size and stops at the edges', () => {
+    const b = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 }
+    expect(moveBox(b, 0.1, -0.1)).toEqual({ x: 0.5, y: 0.3, w: 0.2, h: 0.2 })
+    expect(moveBox(b, 1, 1)).toEqual({ x: 0.8, y: 0.8, w: 0.2, h: 0.2 })
+  })
+
+  test('resizeBox drags the bottom-right corner, never below the minimum or off the canvas', () => {
+    const b = { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }
+    expect(resizeBox(b, 0.1, 0.05)).toEqual({ x: 0.5, y: 0.5, w: 0.3, h: 0.25 })
+    expect(resizeBox(b, -1, -1)).toEqual({ x: 0.5, y: 0.5, w: 0.03, h: 0.03 })
+    expect(resizeBox(b, 1, 1)).toEqual({ x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
+  })
+
+  test('legacyScreenBox keeps centre and width; the height fits a square picture on 16:9', () => {
+    const b = legacyScreenBox({ x: 0, y: 0, w: 0.36 })
+    expect(b.w).toBeCloseTo(0.36)
+    expect(b.h).toBeCloseTo(0.64)
+    expect(b.x).toBeCloseTo(0.32)
+    expect(b.y).toBeCloseTo(0.18)
+  })
+
+  test('widgetPatch turns a dragged widget into the /scene body that places it', () => {
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }
+    const scene = {
+      frames: [
+        { id: 'a', url: 'http://a', show: true, x: 0, y: 0, w: 0.1, h: 0.1 },
+        { id: 'b', url: 'http://b', show: false, x: 0, y: 0, w: 0.1, h: 0.1 },
+      ],
+    }
+    expect(widgetPatch(scene, 'screen', box)).toEqual({ screen: box })
+    expect(widgetPatch(scene, 'captions', box)).toEqual({ captions: box })
+    const p = widgetPatch(scene, 'frame:b', box) as { frames: { id: string }[] }
+    expect(p.frames).toEqual([scene.frames[0], { ...scene.frames[1], ...box }])
+    expect(widgetPatch(scene, 'frame:zzz', box)).toEqual({})
+  })
+
+  test('cleanFrames keeps http(s) frames, assigns ids, defaults show on, and caps the count', () => {
+    const out = cleanFrames([
+      { url: 'http://niku:8300/overlay', x: 0.02, y: 0.5, w: 0.2, h: 0.45 },
+      { url: 'javascript:alert(1)' },
+      { url: 'https://example.com/chat', id: 'chat', show: false },
+      'nope',
+      ...Array.from({ length: 10 }, (_, i) => ({ url: `http://x/${i}` })),
+    ])
+    expect(out).toHaveLength(8)
+    expect(out[0]).toEqual({
+      id: 'frame-1',
+      url: 'http://niku:8300/overlay',
+      show: true,
+      x: 0.02,
+      y: 0.5,
+      w: 0.2,
+      h: 0.45,
+    })
+    expect(out[1]).toMatchObject({ id: 'chat', show: false, url: 'https://example.com/chat' })
+    expect(new Set(out.map((f) => f.id)).size).toBe(8)
+    expect(cleanFrames('nope')).toEqual([])
   })
 })

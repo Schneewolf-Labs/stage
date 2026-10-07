@@ -14,6 +14,7 @@
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
 import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt } from './core.js'
+import { place, renderEdit, renderFrames } from './widgets.js'
 
 const q = new URLSearchParams(location.search)
 const editable = q.get('edit') === '1'
@@ -45,7 +46,7 @@ const lerp = (a, b, k) => a + (b - a) * k
 
 let model = null, pidx = {}
 let transform = { x: 0, y: 0, scale: 1 }
-let scene = { motion: { sway: 1, speed: 1, blink: 3.7, bpm: 0 }, captions: { show: true, size: 22 }, background: { color: '', image: '' }, screen: { x: -0.55, y: -0.15, w: 0.4 } }
+let scene = { motion: { sway: 1, speed: 1, blink: 3.7, bpm: 0 }, captions: { show: true, size: 22, x: 0.15, y: 0.78, w: 0.7, h: 0.16 }, background: { color: '', image: '' }, screen: { x: 0.025, y: 0.0694, w: 0.4, h: 0.7111, show: true }, frames: [] }
 let imageTimer
 let fitNow = () => {}
 // mood -> [{id, value, blend}] from the model's .exp3 files (server finds them; see 'load' cue).
@@ -203,26 +204,36 @@ function apply(cue) {
 
 function applyScene(sc) {
   beatT0 = clock()
-  scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background }, screen: { ...scene.screen, ...sc.screen } }
+  scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background }, screen: { ...scene.screen, ...sc.screen }, frames: sc.frames ?? scene.frames }
   captionEl.style.fontSize = `${scene.captions.size}px`
   if (!showCaptions()) captionEl.style.display = 'none'
   const bg = scene.background
   const img = bg.image ? (/^https?:\/\//.test(bg.image) ? bg.image : `/models/${bg.image}`) : ''
   document.body.classList.toggle('opaque', !!bg.color || !!img || q.get('bg') === '1')
   document.body.style.background = img ? `${bg.color || '#000'} url("${img}") center / cover no-repeat` : bg.color || ''
-  placeScreen()
+  placeWidgets()
 }
 
-/* ---- the screen: a picture the talent shows, placed by scene.screen ---- */
+/* ---- widgets: the screen (pictures the talent shows), the caption box, web-page frames ---- */
 const screenEl = document.getElementById('screen')
-function placeScreen() {
-  const { x, y, w } = scene.screen
-  screenEl.style.width = `${w * 100}%`
-  screenEl.style.left = `${50 + x * 50}%`; screenEl.style.top = `${50 + y * 50}%`
+const capBoxEl = document.getElementById('capbox')
+function placeWidgets() {
+  place(screenEl, scene.screen)
+  place(capBoxEl, scene.captions)
+  if (!scene.screen.show) screenEl.classList.remove('on')
+  // A render is replayed frame by frame; a live web page in it would differ on every run.
+  renderFrames(rendering ? [] : scene.frames)
+  if (editable) renderEdit(scene, liveBox, (body) => fetch('/scene', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
+}
+/** While a widget is dragged in edit mode, move the real one with it. */
+function liveBox(key, box) {
+  if (key === 'screen') place(screenEl, box)
+  else if (key === 'captions') place(capBoxEl, box)
+  else renderFrames(scene.frames.map((f) => (`frame:${f.id}` === key ? { ...f, ...box } : f)))
 }
 function showImage(cue) {
   clearTimeout(imageTimer)
-  if (!cue.url) { screenEl.classList.remove('on'); return }
+  if (!cue.url || !scene.screen.show) { screenEl.classList.remove('on'); return }
   const img = screenEl.querySelector('img'); const cap = screenEl.querySelector('figcaption')
   img.onload = () => screenEl.classList.add('on')
   img.src = cue.url; img.alt = cue.caption || ''

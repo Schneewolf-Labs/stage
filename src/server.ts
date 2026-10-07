@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join, normalize, resolve } from 'node:path'
 import type { ServerWebSocket } from 'bun'
-import { clampTransform } from '../web/core.js'
+import { clampTransform, cleanFrames } from '../web/core.js'
 import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
@@ -415,11 +415,14 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             typeof body[k] === 'object' && body[k]
               ? { ...cur[k], ...(body[k] as Partial<Scene[K]>) }
               : cur[k]
+          if (body.frames !== undefined && !Array.isArray(body.frames))
+            return json({ error: 'frames must be a list of { url, x, y, w, h }' }, 400)
           overrides.scene = {
             motion: { ...pick('motion'), bpm: clampBpm(pick('motion').bpm) },
             captions: pick('captions'),
             background: pick('background'),
             screen: pick('screen'),
+            frames: body.frames === undefined ? cur.frames : cleanFrames(body.frames),
           }
           save()
           stage.cue({ type: 'scene', scene: sceneFrom(overrides) })
