@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { parse } from 'smol-toml'
 import { applyOverrides, readOverrides } from './persist'
+import type { SayAs } from './say-as'
 
 export interface TwitchConfig {
   channel: string
@@ -30,6 +31,8 @@ export interface TalentConfig {
   speed: number
   /** Semitones of f0 shift into the RVC model (e.g. +12 for a low voice into a high model). */
   pitch: number
+  /** Respellings applied only to the text sent to TTS, e.g. { Bophades = "Bo-fay-deez" }. */
+  say_as?: SayAs
   twitch?: TwitchConfig
 }
 
@@ -89,6 +92,15 @@ function parseEgirl(
   return { egirl_url: '', egirl }
 }
 
+function parseSayAs(raw: unknown, name: string): SayAs | undefined {
+  if (raw === undefined) return undefined
+  const w = `talents.${name}.say_as`
+  if (!isObj(raw)) throw new Error(`${w} must be a table`)
+  for (const [k, v] of Object.entries(raw))
+    if (typeof v !== 'string') throw new Error(`${w}.${k} must be a string`)
+  return Object.keys(raw).length ? (raw as SayAs) : undefined
+}
+
 function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
   if (raw === undefined) return undefined
   const w = `talents.${name}.twitch`
@@ -125,6 +137,7 @@ export function parseConfig(text: string): StageConfig {
     const token = typeof t.egirl_token === 'string' ? expand(t.egirl_token) : ''
     const rvc = typeof t.rvc === 'string' && t.rvc ? t.rvc : undefined
     const twitch = parseTwitch(t.twitch, name)
+    const say_as = parseSayAs(t.say_as, name)
     talents[name] = {
       name,
       ...parseEgirl(t, w, !!wald),
@@ -135,6 +148,7 @@ export function parseConfig(text: string): StageConfig {
       ...(rvc ? { rvc } : {}),
       speed: num(t, 'speed', 1.0),
       pitch: num(t, 'pitch', 0),
+      ...(say_as ? { say_as } : {}),
       ...(twitch ? { twitch } : {}),
     }
   }

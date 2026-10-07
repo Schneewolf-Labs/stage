@@ -35,6 +35,11 @@ speed = 1.0
 # Semitones of pitch shift into the RVC model; 0 for a voice already in the model's range.
 pitch = 0
 
+# Optional: respellings for words the voice gets wrong. Whole words, any case; only the audio
+# changes, captions keep the original. Check one with: stage say "..." and listen.
+[talents.springfield.say_as]
+"LoRA" = "lora"
+
 # Optional: let the talent hear (and answer) a Twitch chat. Remove the table to run without it.
 [talents.springfield.twitch]
 channel = "nbeerbower"

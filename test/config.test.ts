@@ -57,6 +57,19 @@ nick = "bot"
     ).toThrow(/both nick and token/)
   })
 
+  test('parses the optional say_as table of pronunciations', () => {
+    expect(parseConfig(TOML).talents.a?.say_as).toBeUndefined()
+    const cfg = parseConfig(`${TOML}
+[talents.a.say_as]
+Bophades = "Bo-fay-deez"
+"got 'em" = "got um"
+`)
+    expect(cfg.talents.a?.say_as).toEqual({ Bophades: 'Bo-fay-deez', "got 'em": 'got um' })
+    expect(() => parseConfig(`${TOML}\n[talents.a.say_as]\nx = 1\n`)).toThrow(
+      /talents\.a\.say_as\.x must be a string/,
+    )
+  })
+
   test('a talent can name its egirl in wald instead of pinning a URL', () => {
     const cfg = parseConfig(`${TOML}
 [wald]

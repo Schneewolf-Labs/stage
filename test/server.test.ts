@@ -214,6 +214,7 @@ const talent: TalentConfig = {
   rvc: 'egirl',
   speed: 1,
   pitch: 0,
+  say_as: { Bophades: 'Bo-fay-deez' },
 }
 const cfg: StageConfig = {
   server: { host: '127.0.0.1', port: 0, models_dir: modelsDir },
@@ -417,6 +418,17 @@ describe('voice', () => {
     expect(last.pitch).toBe(12)
     await post('/voice', { voice: 'af_heart', rvc: 'egirl', pitch: 0, speed: 1 })
     con.close()
+  })
+})
+
+describe('say_as', () => {
+  test('the voice hears the respelling, the page keeps the written word', async () => {
+    const page = await client()
+    await post('/say', { text: "I'm Bophades." })
+    const cue = await page.waitFor((m) => m.type === 'speak' && /Bophades/.test(String(m.text)))
+    expect(cue.text).toBe("I'm Bophades.")
+    expect((voiceCalls.at(-1) as { text: string }).text).toBe("I'm Bo-fay-deez.")
+    page.close()
   })
 })
 
