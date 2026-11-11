@@ -24,6 +24,8 @@ export function renderFrames(frames) {
       el = document.createElement('iframe')
       el.dataset.id = f.id
       el.setAttribute('allowtransparency', 'true')
+      // A frame may carry sound (a game feed's audio): let it play once the page has been clicked.
+      el.setAttribute('allow', 'autoplay')
       el.setAttribute('scrolling', 'no')
       framesEl.append(el)
     }
