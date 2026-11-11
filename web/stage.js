@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt } from './core.js'
+import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt, gazeAt, talkMotion, reactionAt, REACTIONS } from './core.js'
 import { place, renderEdit, renderFrames } from './widgets.js'
 
 const q = new URLSearchParams(location.search)
@@ -53,6 +53,8 @@ let fitNow = () => {}
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
 let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
+// Lively motion (scene.motion.lively): the running reaction and when it started; see core.reactionAt.
+let react = null, reactAt = 0, reactMoodTimer = null, gx = 0, gy = 0
 // Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
 let beatT0 = clock(), tilt = 0, bodyTilt = 0
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
@@ -94,6 +96,19 @@ async function load(url) {
     if (nodT >= 0) { fy += Math.sin(nodT * Math.PI * 2) * -0.5; nodT += dt * 2.2; if (nodT > 1) nodT = -1 }
     const d = danceAt((now - beatT0) / 1000, scene.motion.bpm, sway)
     fx += d.fx; fy += d.fy
+    // Lively motion: gaze shifts (camera / content / away), a bob while talking, reactions.
+    const lively = scene.motion.lively || 0
+    let live = { tilt: 0, body: 0 }
+    if (lively > 0) {
+      const g = gazeAt(t, scene.motion.gaze || 0)
+      gx = lerp(gx, g.x, 0.12); gy = lerp(gy, g.y, 0.12)
+      const talk = talkMotion(mouth, t)
+      const r = react ? reactionAt(react, (now - reactAt) / 1000) : null
+      if (react && !r) react = null
+      fx += gx * lively; fy += (gy + talk.fy) * lively
+      if (r) { fx += r.fx; fy += r.fy }
+      live = { tilt: talk.tilt * lively + (r ? r.tilt : 0), body: gx * 7 * lively + talk.body * lively + (r ? r.body : 0) }
+    }
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
     const driven = expressions[mood] ? 'neutral' : mood
@@ -128,7 +143,14 @@ async function load(url) {
     }
     // Head and body tilt ride on top of what the focus controller wrote (it sets AngleZ too).
     tilt = lerp(tilt, d.tilt, 0.3); bodyTilt = lerp(bodyTilt, d.body, 0.3)
-    add('ParamAngleZ', tilt); add('ParamBodyAngleZ', bodyTilt)
+    add('ParamAngleZ', tilt + live.tilt); add('ParamBodyAngleZ', bodyTilt)
+    if (scene.motion.lively > 0) {
+      // Body lean into the gaze (chb119 has BodyAngleX but no BodyAngleZ), eyes leading the head,
+      // and breathing driven explicitly, since the rig's physics only takes AngleX.
+      add('ParamBodyAngleX', live.body)
+      add('ParamEyeBallX', gx * 0.35); add('ParamEyeBallY', gy * 0.3)
+      set('ParamBreath', 0.5 + 0.5 * Math.sin(t * 2.1))
+    }
     set('Param', poseOn) // chb119's pose toggle; harmless on models without it
     for (const id in pinned) set(id, pinned[id])
   })
@@ -196,6 +218,17 @@ function apply(cue) {
     case 'mood': mood = cue.mood; moodAt = clock(); break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
+    case 'react': {
+      // A short body reaction (core.REACTIONS), with its mood for as long as it lasts.
+      const spec = REACTIONS[cue.kind]; if (!spec) break
+      react = cue.kind; reactAt = clock()
+      if (spec[1]) {
+        mood = spec[1]; moodAt = clock()
+        clearTimeout(reactMoodTimer)
+        reactMoodTimer = setTimeout(() => { if (mood === spec[1]) { mood = 'neutral'; moodAt = clock() } }, spec[0] * 1000)
+      }
+      break
+    }
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break
     case 'stop': queue.length = 0; if (current) { try { current.stop() } catch {} } break
     case 'param': if (cue.value === null) delete pinned[cue.id]; else pinned[cue.id] = cue.value; break

@@ -12,13 +12,17 @@ import {
   encodeWav,
   eyeTarget,
   fitModel,
+  gazeAt,
   legacyScreenBox,
   mouthAt,
   moveBox,
+  REACTIONS,
+  reactionAt,
   readiness,
   resizeBox,
   riskyReach,
   riskyTools,
+  talkMotion,
   turnReducer,
   widgetPatch,
 } from '../web/core.js'
@@ -472,5 +476,42 @@ describe('widget boxes', () => {
     expect(out[1]).toMatchObject({ id: 'chat', show: false, url: 'https://example.com/chat' })
     expect(new Set(out.map((f) => f.id)).size).toBe(8)
     expect(cleanFrames('nope')).toEqual([])
+  })
+})
+
+describe('lively motion', () => {
+  test('gazeAt is deterministic, bounded, and visits the content side', () => {
+    let content = 0,
+      camera = 0
+    for (let t = 0; t < 600; t += 0.5) {
+      const a = gazeAt(t, -1),
+        b = gazeAt(t, -1)
+      expect(a).toEqual(b)
+      expect(Math.abs(a.x)).toBeLessThanOrEqual(0.8)
+      expect(Math.abs(a.y)).toBeLessThanOrEqual(0.3)
+      if (a.at === 'content') content++
+      if (a.at === 'camera') camera++
+    }
+    expect(content).toBeGreaterThan(100)
+    expect(camera).toBeGreaterThan(100)
+  })
+
+  test('gazeAt never looks at content when there is none', () => {
+    for (let t = 0; t < 300; t += 0.5) expect(gazeAt(t, 0).at).not.toBe('content')
+  })
+
+  test('talkMotion is still when silent and moves when talking', () => {
+    const still = talkMotion(0, 3)
+    expect(Math.abs(still.fy) + Math.abs(still.tilt) + Math.abs(still.body)).toBe(0)
+    const m = talkMotion(1, 3)
+    expect(Math.abs(m.fy) + Math.abs(m.tilt)).toBeGreaterThan(0)
+  })
+
+  test('reactionAt runs for its duration and then ends', () => {
+    for (const kind of Object.keys(REACTIONS)) {
+      expect(reactionAt(kind, 0.05)).not.toBeNull()
+      expect(reactionAt(kind, REACTIONS[kind][0] + 0.01)).toBeNull()
+    }
+    expect(reactionAt('nope', 0.1)).toBeNull()
   })
 })

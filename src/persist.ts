@@ -30,8 +30,18 @@ export interface Scene {
   /**
    * Idle motion: sway amplitude and speed multipliers, blink interval seconds, and a dance
    * tempo (beats per minute, 0 = off) that bobs the head on the beat while music plays.
+   * `lively` (0..1, 0 = off) adds gaze shifts, a bob while talking and reactions (web/core.js
+   * gazeAt / talkMotion / reactionAt) for rigs with no motions of their own; `gaze` is the side
+   * the content is on, -1 left .. 1 right, so the talent glances at it.
    */
-  motion: { sway: number; speed: number; blink: number; bpm: number }
+  motion: {
+    sway: number
+    speed: number
+    blink: number
+    bpm: number
+    lively?: number
+    gaze?: number
+  }
   /** The spoken line, at the bottom of its box. */
   captions: Box & { show: boolean; size: number }
   /** Colour, and/or an image path under models_dir (served at /models/) or a URL. */

@@ -34,3 +34,7 @@ export function resizeBox(b: Box, dw: number, dh: number): Box
 export function legacyScreenBox(s: { x?: number; y?: number; w?: number } | undefined | null): Box
 export function cleanFrames(list: unknown): Frame[]
 export function widgetPatch(scene: Pick<Scene, 'frames'>, key: string, box: Box): Partial<Pick<Scene, 'screen' | 'captions' | 'frames'>> | { screen: Box } | { captions: Box }
+export function gazeAt(t: number, gazeX?: number): { x: number; y: number; at: 'camera' | 'content' | 'away' }
+export function talkMotion(level: number, t: number): { fy: number; tilt: number; body: number }
+export const REACTIONS: Record<string, [number, string | null]>
+export function reactionAt(kind: string, s: number): { fx: number; fy: number; tilt: number; body: number } | null

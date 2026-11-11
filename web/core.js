@@ -260,3 +260,95 @@ export function danceAt(t, bpm, sway) {
     body: Math.sin((Math.PI * beat) / 2 + 0.3) * 4 * sway,
   }
 }
+
+// ----- Lively motion (opt-in: scene.motion.lively > 0) -------------------------------------
+//
+// A talent with no motions and no expressions -- chb119 has 17 parameters and nothing else --
+// otherwise only ever sways. These three functions give it something to do from the parameters
+// every model has: where it looks, how its head moves while it talks, and short reactions to
+// events. Pure and deterministic so they can be tested and so a rendered reel looks the same
+// every time; stage.js only applies what they return.
+
+// Cheap deterministic hash -> [0, 1).
+const hash01 = (n) => {
+  const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453
+  return s - Math.floor(s)
+}
+
+/**
+ * Where the talent looks at time t, as focus-controller coordinates (-1..1, +y up).
+ * Gaze holds for 3-8 s at a time, then moves: mostly at the camera, often at the content
+ * (gazeX: the side the game or screen is on, -1 left .. 1 right), sometimes a short glance
+ * away. Moves ease over ~0.35 s so it reads as a look, not a snap.
+ * @param {number} t seconds
+ * @param {number} gazeX side of the content, -1..1 (0 = no content to look at)
+ * @returns {{x: number, y: number, at: 'camera' | 'content' | 'away'}}
+ */
+export function gazeAt(t, gazeX = 0) {
+  // Segment boundaries: each segment's length is drawn from its index, so any t maps to one.
+  let start = 0, i = 0
+  while (true) {
+    const len = 3 + hash01(i) * 5
+    if (start + len > t) break
+    start += len; i++
+    if (i > 100000) break
+  }
+  const pick = (k) => {
+    const r = hash01(k * 7.13 + 1)
+    if (gazeX !== 0 && r < 0.4) return { x: gazeX * 0.75, y: -0.15, at: 'content' }
+    if (r > 0.88) return { x: (hash01(k + 3.3) - 0.5) * 1.2, y: 0.25, at: 'away' }
+    return { x: (hash01(k + 9.1) - 0.5) * 0.2, y: 0, at: 'camera' }
+  }
+  const now = pick(i), prev = i > 0 ? pick(i - 1) : now
+  const k = Math.min(1, (t - start) / 0.35)
+  const e = k * k * (3 - 2 * k)
+  return { x: prev.x + (now.x - prev.x) * e, y: prev.y + (now.y - prev.y) * e, at: now.at }
+}
+
+/**
+ * Head motion that rides on speech: a small bob and tilt that follow the mouth level, so
+ * a talking head does not stay perfectly still while only its mouth moves.
+ * @param {number} level mouth openness 0..1 (what drives ParamMouthOpenY)
+ * @param {number} t seconds
+ * @returns {{fy: number, tilt: number, body: number}}
+ */
+export function talkMotion(level, t) {
+  const l = Math.max(0, Math.min(1, level))
+  return {
+    fy: -l * 0.16 * (0.6 + 0.4 * Math.sin(t * 6.5)),
+    tilt: Math.sin(t * 1.7) * l * 5,
+    body: Math.sin(t * 1.1 + 0.4) * l * 3,
+  }
+}
+
+/** Reactions: kind -> [duration s, mood or null]. */
+export const REACTIONS = {
+  flinch: [0.7, 'surprised'],
+  shock: [1.6, 'surprised'],
+  cheer: [1.4, 'happy'],
+  smug: [2.2, 'happy'],
+  sulk: [2.4, 'sad'],
+}
+
+/**
+ * A reaction's motion `s` seconds after it started, or null once it is over. Envelopes rise
+ * fast and settle slowly, the way a body reacts.
+ * @param {string} kind a REACTIONS key
+ * @param {number} s seconds since the reaction began
+ * @returns {{fx: number, fy: number, tilt: number, body: number} | null}
+ */
+export function reactionAt(kind, s) {
+  const spec = REACTIONS[kind]
+  if (!spec || s < 0 || s > spec[0]) return null
+  const p = s / spec[0]
+  const env = Math.sin(Math.PI * Math.min(1, p * 2.5)) ** 2 * (1 - p) // fast attack, slow release
+  const settle = Math.exp(-4 * p)
+  switch (kind) {
+    case 'flinch': return { fx: -0.25 * settle, fy: 0.3 * settle, tilt: -10 * settle, body: -6 * settle }
+    case 'shock': return { fx: 0, fy: 0.45 * settle, tilt: 6 * Math.sin(s * 18) * settle, body: -8 * settle }
+    case 'cheer': return { fx: 0, fy: -0.35 * Math.abs(Math.sin(s * 9)) * (1 - p), tilt: 8 * Math.sin(s * 4.5) * (1 - p), body: 6 * Math.sin(s * 4.5) * (1 - p) }
+    case 'smug': return { fx: 0.2 * env, fy: -0.1 * env, tilt: 12 * Math.min(1, s * 3) * (1 - p * p), body: 3 * env }
+    case 'sulk': return { fx: -0.2 * (1 - p), fy: -0.35 * (1 - p), tilt: -5 * (1 - p), body: -3 * (1 - p) }
+  }
+  return null
+}
