@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt, gazeAt, talkMotion, reactionAt, REACTIONS } from './core.js'
+import { REACTIONS, bodyMotion, clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, gazeAt, moodFromText, mouthAt, reactionAt, talkMotion } from './core.js'
 import { place, renderEdit, renderFrames } from './widgets.js'
 
 const q = new URLSearchParams(location.search)
@@ -55,6 +55,9 @@ let expressions = {}, expWeight = {}
 let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
 // Lively motion (scene.motion.lively): the running reaction and when it started; see core.reactionAt.
 let react = null, reactAt = 0, reactMoodTimer = null, gx = 0, gy = 0
+// Where fit() put the model; bodyMotion offsets are applied on top every frame. autoMood is the
+// mood moodFromText set for the sentence playing now, so it is cleared when that clip ends.
+let base = { x: 0, y: 0, scale: 1, h: 1 }, autoMood = null
 // Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
 let beatT0 = clock(), tilt = 0, bodyTilt = 0
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
@@ -78,6 +81,7 @@ async function load(url) {
   const fit = () => {
     const f = fitModel({ w: app.screen.width, h: app.screen.height }, natural, transform)
     m.scale.set(f.scale); m.anchor.set(0.5, 0.5); m.position.set(f.x, f.y)
+    base = { x: f.x, y: f.y, scale: f.scale, h: natural.h }
   }
   fitNow = fit
   fit(); window.addEventListener('resize', fit)
@@ -108,6 +112,15 @@ async function load(url) {
       fx += gx * lively; fy += (gy + talk.fy) * lively
       if (r) { fx += r.fx; fy += r.fy }
       live = { tilt: talk.tilt * lively + (r ? r.tilt : 0), body: gx * 7 * lively + talk.body * lively + (r ? r.body : 0) }
+      // Whole-body motion on the sprite: this rig cannot move its head vertically, so bounce,
+      // lean and squash happen here instead (core.bodyMotion).
+      const b = bodyMotion(t, mouth, gx, react, (now - reactAt) / 1000)
+      m.position.set(base.x, base.y + b.dy * lively * base.h * base.scale)
+      m.rotation = (b.rot * lively * Math.PI) / 180
+      m.scale.set(base.scale * (1 + (b.sx - 1) * lively), base.scale * (1 + (b.sy - 1) * lively))
+    } else if (m.rotation) {
+      // Lively switched off: put the sprite back where fit() left it.
+      m.rotation = 0; m.position.set(base.x, base.y); m.scale.set(base.scale)
     }
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
@@ -181,10 +194,17 @@ async function pump() {
     if (muted) { const g = ac.createGain(); g.gain.value = 0; analyser.connect(g); g.connect(ac.destination) }
     else analyser.connect(ac.destination)
     if (showCaptions()) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
+    // A face for the sentence from its words, unless a cue tag set one just now (motion.automood).
+    if (scene.motion.automood && (mood === 'neutral' || mood === autoMood || clock() - moodAt > 4000)) {
+      const md = moodFromText(cue.text)
+      if (md) { mood = md; moodAt = clock(); autoMood = md }
+    }
     send({ type: 'playing', id: cue.id })
     await new Promise((res) => { src.onended = res; trackStart = ac.currentTime; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
   analyser = null; current = null; track = null; captionEl.style.display = 'none'
+  if (autoMood && mood === autoMood) { mood = 'neutral'; moodAt = clock() }
+  autoMood = null
   send({ type: 'spoke', id: cue.id })
   playing = false
   pump()

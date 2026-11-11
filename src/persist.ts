@@ -32,7 +32,8 @@ export interface Scene {
    * tempo (beats per minute, 0 = off) that bobs the head on the beat while music plays.
    * `lively` (0..1, 0 = off) adds gaze shifts, a bob while talking and reactions (web/core.js
    * gazeAt / talkMotion / reactionAt) for rigs with no motions of their own; `gaze` is the side
-   * the content is on, -1 left .. 1 right, so the talent glances at it.
+   * the content is on, -1 left .. 1 right, so the talent glances at it. `automood` gives each
+   * spoken sentence a face from its words (core.moodFromText) when no cue tag set one.
    */
   motion: {
     sway: number
@@ -41,6 +42,7 @@ export interface Scene {
     bpm: number
     lively?: number
     gaze?: number
+    automood?: boolean
   }
   /** The spoken line, at the bottom of its box. */
   captions: Box & { show: boolean; size: number }

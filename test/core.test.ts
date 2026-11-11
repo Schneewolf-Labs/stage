@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  bodyMotion,
   clampBox,
   clampTransform,
   cleanFrames,
@@ -14,6 +15,7 @@ import {
   fitModel,
   gazeAt,
   legacyScreenBox,
+  moodFromText,
   mouthAt,
   moveBox,
   REACTIONS,
@@ -513,5 +515,39 @@ describe('lively motion', () => {
       expect(reactionAt(kind, REACTIONS[kind][0] + 0.01)).toBeNull()
     }
     expect(reactionAt('nope', 0.1)).toBeNull()
+  })
+})
+
+describe('body motion and auto moods', () => {
+  test('bodyMotion stays small at rest and grows while talking', () => {
+    for (let t = 0; t < 30; t += 0.1) {
+      const r = bodyMotion(t, 0, 0, null, 0)
+      expect(Math.abs(r.dy)).toBeLessThan(0.01)
+      expect(Math.abs(r.rot)).toBeLessThan(1)
+      expect(r.sx).toBe(1)
+    }
+    let most = 0
+    for (let t = 0; t < 5; t += 0.05)
+      most = Math.max(most, Math.abs(bodyMotion(t, 1, 0, null, 0).dy))
+    expect(most).toBeGreaterThan(0.01)
+  })
+
+  test('a cheer hops and every reaction ends', () => {
+    let peak = 0
+    for (let s = 0; s < REACTIONS.cheer[0]; s += 0.02)
+      peak = Math.min(peak, bodyMotion(0, 0, 0, 'cheer', s).dy)
+    expect(peak).toBeLessThan(-0.03)
+    for (const kind of Object.keys(REACTIONS)) {
+      const after = bodyMotion(0, 0, 0, kind, REACTIONS[kind][0] + 0.5)
+      expect(after).toEqual(bodyMotion(0, 0, 0, null, 0))
+    }
+  })
+
+  test('moodFromText reads clear cues and leaves plain lines alone', () => {
+    expect(moodFromText('Two shots, two hits. Calculated.')).toBe('happy')
+    expect(moodFromText('Ow! That one hurt.')).toBe('surprised')
+    expect(moodFromText('Puska stole my point.')).toBe('angry')
+    expect(moodFromText('We lost this one.')).toBe('sad')
+    expect(moodFromText('Moving up to the ridge.')).toBeNull()
   })
 })

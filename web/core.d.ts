@@ -38,3 +38,5 @@ export function gazeAt(t: number, gazeX?: number): { x: number; y: number; at: '
 export function talkMotion(level: number, t: number): { fy: number; tilt: number; body: number }
 export const REACTIONS: Record<string, [number, string | null]>
 export function reactionAt(kind: string, s: number): { fx: number; fy: number; tilt: number; body: number } | null
+export function bodyMotion(t: number, level: number, gaze: number, kind: string | null, s: number): { dy: number; rot: number; sx: number; sy: number }
+export function moodFromText(text: string): 'happy' | 'sad' | 'angry' | 'surprised' | null

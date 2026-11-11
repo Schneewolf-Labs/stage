@@ -352,3 +352,63 @@ export function reactionAt(kind, s) {
   }
   return null
 }
+
+/**
+ * Whole-body motion: offsets applied to the model sprite itself, for rigs that cannot move
+ * their own head vertically (chb119 has no ParamAngleY, so every nod and bob sent through the
+ * focus controller only ever moved the eyes). A gentle bob and sway at rest, bounce and lean
+ * while talking, a lean towards where it is looking, and each reaction's body language.
+ * @param {number} t seconds
+ * @param {number} level mouth openness 0..1
+ * @param {number} gaze current horizontal gaze, -1..1
+ * @param {string|null} kind running reaction (REACTIONS key) or null
+ * @param {number} s seconds since that reaction began
+ * @returns {{dy: number, rot: number, sx: number, sy: number}} dy as a fraction of the model's
+ *   height (+ is down), rot in degrees, sx/sy scale multipliers (squash and stretch)
+ */
+export function bodyMotion(t, level, gaze, kind, s) {
+  const l = Math.max(0, Math.min(1, level))
+  let dy = Math.sin(t * 1.6) * 0.004 - l * 0.012 * Math.abs(Math.sin(t * 7))
+  let rot = Math.sin(t * 0.45) * 0.6 + Math.sin(t * 2.2) * l * 1.2 + gaze * 1.5
+  let sx = 1, sy = 1
+  const spec = kind ? REACTIONS[kind] : null
+  if (spec && s >= 0 && s <= spec[0]) {
+    const p = s / spec[0]
+    const settle = Math.exp(-5 * p)
+    switch (kind) {
+      case 'cheer': {
+        // Two hops, squashing on each landing.
+        const hop = Math.abs(Math.sin(s * 7)) * (1 - p)
+        dy -= 0.05 * hop
+        const land = 1 - hop
+        sy *= 1 - 0.05 * land * (1 - p); sx *= 1 + 0.04 * land * (1 - p)
+        rot += Math.sin(s * 5) * 3 * (1 - p)
+        break
+      }
+      case 'flinch': dy += 0.015 * settle; rot -= 4 * settle; sx *= 1 - 0.03 * settle; break
+      case 'shock': dy -= 0.03 * Math.exp(-9 * p); sy *= 1 + 0.05 * settle; rot += Math.sin(s * 20) * 1.5 * settle; break
+      case 'smug': rot += 5 * Math.min(1, s * 4) * (1 - p * p); dy += 0.006 * Math.min(1, s * 4) * (1 - p); break
+      case 'sulk': dy += 0.02 * (1 - p); sy *= 1 - 0.03 * (1 - p); rot -= 2 * (1 - p); break
+    }
+  }
+  return { dy, rot, sx, sy }
+}
+
+// Word cues for moodFromText, checked in order: the first that matches wins.
+const MOOD_CUES = [
+  ['surprised', /\b(ow+|ouch|whoa|wait,|what\?|huh|yikes|oh no)\b|!\?/i],
+  ['angry', /\b(stole|steal|rude|how dare|cheap shot|avenge|revenge|grr+)\b/i],
+  ['sad', /\b(lost|losing|defeat|ugh|sigh|unlucky|not my day)\b/i],
+  ['happy', /\b(calculated|nice|perfect|easy|ha+|hehe|got (?:him|her|them|it)|victory|won|tier up|yes!)\b/i],
+]
+
+/**
+ * A mood for a spoken sentence, for talents whose model rarely writes cue tags itself. Only
+ * clear word cues count; anything else is null, so a plain sentence keeps the current mood.
+ * @param {string} text
+ * @returns {'happy'|'sad'|'angry'|'surprised'|null}
+ */
+export function moodFromText(text) {
+  for (const [mood, re] of MOOD_CUES) if (re.test(text || '')) return mood
+  return null
+}
