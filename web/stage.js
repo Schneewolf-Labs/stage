@@ -58,6 +58,8 @@ let react = null, reactAt = 0, reactMoodTimer = null, gx = 0, gy = 0
 // Where fit() put the model; bodyMotion offsets are applied on top every frame. autoMood is the
 // mood moodFromText set for the sentence playing now, so it is cleared when that clip ends.
 let base = { x: 0, y: 0, scale: 1, h: 1 }, autoMood = null
+// Hair follows the body: the sprite's last offsets and the hair's spring state (see below).
+let lastRot = 0, lastDy = 0, hairV = 0, hairX = 0
 // Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
 let beatT0 = clock(), tilt = 0, bodyTilt = 0
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
@@ -118,6 +120,17 @@ async function load(url) {
       m.position.set(base.x, base.y + b.dy * lively * base.h * base.scale)
       m.rotation = (b.rot * lively * Math.PI) / 180
       m.scale.set(base.scale * (1 + (b.sx - 1) * lively), base.scale * (1 + (b.sy - 1) * lively))
+      // The rig's hair physics reads AngleX/AngleZ/BodyAngleX and writes the hair itself, so a hop
+      // or lean of the whole sprite left the hair rigid. A damped spring driven by the sprite's own
+      // motion feeds a little follow-through into those inputs; the physics swings the hair.
+      if (dt > 0) {
+        const push = ((b.rot - lastRot) * 0.08 + (b.dy - lastDy) * 40) / dt
+        hairV += (push - hairX * 60 - hairV * 7) * dt
+        hairX += hairV * dt
+      }
+      lastRot = b.rot; lastDy = b.dy
+      const follow = Math.max(-1, Math.min(1, hairX)) * lively
+      live.tilt += follow * 4; live.body += follow * 5
     } else if (m.rotation) {
       // Lively switched off: put the sprite back where fit() left it.
       m.rotation = 0; m.position.set(base.x, base.y); m.scale.set(base.scale)
