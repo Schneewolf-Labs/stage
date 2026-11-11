@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, mouthAt } from './core.js'
+import { REACTIONS, bodyMotion, clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, gazeAt, moodFromText, mouthAt, reactionAt, talkMotion } from './core.js'
 import { place, renderEdit, renderFrames } from './widgets.js'
 
 const q = new URLSearchParams(location.search)
@@ -53,6 +53,13 @@ let fitNow = () => {}
 // Applied on top of the parameter-driven moods with a fade, the way Cubism's ExpressionMotion does.
 let expressions = {}, expWeight = {}
 let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
+// Lively motion (scene.motion.lively): the running reaction and when it started; see core.reactionAt.
+let react = null, reactAt = 0, reactMoodTimer = null, gx = 0, gy = 0
+// Where fit() put the model; bodyMotion offsets are applied on top every frame. autoMood is the
+// mood moodFromText set for the sentence playing now, so it is cleared when that clip ends.
+let base = { x: 0, y: 0, scale: 1, h: 1 }, autoMood = null
+// Hair follows the body: the sprite's last offsets and the hair's spring state (see below).
+let lastRot = 0, lastDy = 0, hairV = 0, hairX = 0
 // Dancing: beats count from the last scene cue, so re-sending the scene re-syncs to the music.
 let beatT0 = clock(), tilt = 0, bodyTilt = 0
 const cur = { bl: 0, br: 0, ba: 0, form: 0, eye: 1, smile: 0 }
@@ -76,6 +83,7 @@ async function load(url) {
   const fit = () => {
     const f = fitModel({ w: app.screen.width, h: app.screen.height }, natural, transform)
     m.scale.set(f.scale); m.anchor.set(0.5, 0.5); m.position.set(f.x, f.y)
+    base = { x: f.x, y: f.y, scale: f.scale, h: natural.h }
   }
   fitNow = fit
   fit(); window.addEventListener('resize', fit)
@@ -94,6 +102,39 @@ async function load(url) {
     if (nodT >= 0) { fy += Math.sin(nodT * Math.PI * 2) * -0.5; nodT += dt * 2.2; if (nodT > 1) nodT = -1 }
     const d = danceAt((now - beatT0) / 1000, scene.motion.bpm, sway)
     fx += d.fx; fy += d.fy
+    // Lively motion: gaze shifts (camera / content / away), a bob while talking, reactions.
+    const lively = scene.motion.lively || 0
+    let live = { tilt: 0, body: 0 }
+    if (lively > 0) {
+      const g = gazeAt(t, scene.motion.gaze || 0)
+      gx = lerp(gx, g.x, 0.12); gy = lerp(gy, g.y, 0.12)
+      const talk = talkMotion(mouth, t)
+      const r = react ? reactionAt(react, (now - reactAt) / 1000) : null
+      if (react && !r) react = null
+      fx += gx * lively; fy += (gy + talk.fy) * lively
+      if (r) { fx += r.fx; fy += r.fy }
+      live = { tilt: talk.tilt * lively + (r ? r.tilt : 0), body: gx * 7 * lively + talk.body * lively + (r ? r.body : 0) }
+      // Whole-body motion on the sprite: this rig cannot move its head vertically, so bounce,
+      // lean and squash happen here instead (core.bodyMotion).
+      const b = bodyMotion(t, mouth, gx, react, (now - reactAt) / 1000)
+      m.position.set(base.x, base.y + b.dy * lively * base.h * base.scale)
+      m.rotation = (b.rot * lively * Math.PI) / 180
+      m.scale.set(base.scale * (1 + (b.sx - 1) * lively), base.scale * (1 + (b.sy - 1) * lively))
+      // The rig's hair physics reads AngleX/AngleZ/BodyAngleX and writes the hair itself, so a hop
+      // or lean of the whole sprite left the hair rigid. A damped spring driven by the sprite's own
+      // motion feeds a little follow-through into those inputs; the physics swings the hair.
+      if (dt > 0) {
+        const push = ((b.rot - lastRot) * 0.08 + (b.dy - lastDy) * 40) / dt
+        hairV += (push - hairX * 60 - hairV * 7) * dt
+        hairX += hairV * dt
+      }
+      lastRot = b.rot; lastDy = b.dy
+      const follow = Math.max(-1, Math.min(1, hairX)) * lively
+      live.tilt += follow * 4; live.body += follow * 5
+    } else if (m.rotation) {
+      // Lively switched off: put the sprite back where fit() left it.
+      m.rotation = 0; m.position.set(base.x, base.y); m.scale.set(base.scale)
+    }
     m.internalModel.focusController.focus(fx, fy, false)
     const blink = (t % Math.max(0.5, scene.motion.blink)) < 0.12 ? 0 : 1
     const driven = expressions[mood] ? 'neutral' : mood
@@ -128,7 +169,14 @@ async function load(url) {
     }
     // Head and body tilt ride on top of what the focus controller wrote (it sets AngleZ too).
     tilt = lerp(tilt, d.tilt, 0.3); bodyTilt = lerp(bodyTilt, d.body, 0.3)
-    add('ParamAngleZ', tilt); add('ParamBodyAngleZ', bodyTilt)
+    add('ParamAngleZ', tilt + live.tilt); add('ParamBodyAngleZ', bodyTilt)
+    if (scene.motion.lively > 0) {
+      // Body lean into the gaze (chb119 has BodyAngleX but no BodyAngleZ), eyes leading the head,
+      // and breathing driven explicitly, since the rig's physics only takes AngleX.
+      add('ParamBodyAngleX', live.body)
+      add('ParamEyeBallX', gx * 0.35); add('ParamEyeBallY', gy * 0.3)
+      set('ParamBreath', 0.5 + 0.5 * Math.sin(t * 2.1))
+    }
     set('Param', poseOn) // chb119's pose toggle; harmless on models without it
     for (const id in pinned) set(id, pinned[id])
   })
@@ -159,10 +207,17 @@ async function pump() {
     if (muted) { const g = ac.createGain(); g.gain.value = 0; analyser.connect(g); g.connect(ac.destination) }
     else analyser.connect(ac.destination)
     if (showCaptions()) { captionEl.textContent = cue.text; captionEl.style.display = 'block' }
+    // A face for the sentence from its words, unless a cue tag set one just now (motion.automood).
+    if (scene.motion.automood && (mood === 'neutral' || mood === autoMood || clock() - moodAt > 4000)) {
+      const md = moodFromText(cue.text)
+      if (md) { mood = md; moodAt = clock(); autoMood = md }
+    }
     send({ type: 'playing', id: cue.id })
     await new Promise((res) => { src.onended = res; trackStart = ac.currentTime; src.start() })
   } catch (e) { status(`playback error: ${e.message}`) }
   analyser = null; current = null; track = null; captionEl.style.display = 'none'
+  if (autoMood && mood === autoMood) { mood = 'neutral'; moodAt = clock() }
+  autoMood = null
   send({ type: 'spoke', id: cue.id })
   playing = false
   pump()
@@ -196,6 +251,17 @@ function apply(cue) {
     case 'mood': mood = cue.mood; moodAt = clock(); break
     case 'state': state = cue.state; if (cue.detail) status(`${cue.state}: ${cue.detail}`); break
     case 'gesture': if (cue.name === 'nod') nodT = 0; else if (cue.name === 'pose') poseOn = poseOn ? 0 : 1; break
+    case 'react': {
+      // A short body reaction (core.REACTIONS), with its mood for as long as it lasts.
+      const spec = REACTIONS[cue.kind]; if (!spec) break
+      react = cue.kind; reactAt = clock()
+      if (spec[1]) {
+        mood = spec[1]; moodAt = clock()
+        clearTimeout(reactMoodTimer)
+        reactMoodTimer = setTimeout(() => { if (mood === spec[1]) { mood = 'neutral'; moodAt = clock() } }, spec[0] * 1000)
+      }
+      break
+    }
     case 'caption': captionEl.textContent = cue.text; captionEl.style.display = cue.text ? 'block' : 'none'; break
     case 'stop': queue.length = 0; if (current) { try { current.stop() } catch {} } break
     case 'param': if (cue.value === null) delete pinned[cue.id]; else pinned[cue.id] = cue.value; break

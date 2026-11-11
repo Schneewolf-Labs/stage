@@ -65,6 +65,8 @@ export type StageCue =
   | { type: 'mood'; mood: Mood }
   | { type: 'state'; state: StageState; detail?: string }
   | { type: 'gesture'; name: 'nod' | 'pose' }
+  /** A short body reaction with its mood: flinch, shock, cheer, smug, sulk (web/core.js REACTIONS). */
+  | { type: 'react'; kind: 'flinch' | 'shock' | 'cheer' | 'smug' | 'sulk' }
   | { type: 'caption'; text: string }
   /** Cut the current clip and drop everything queued. */
   | { type: 'stop' }
