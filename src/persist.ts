@@ -44,8 +44,16 @@ export interface Scene {
     gaze?: number
     automood?: boolean
   }
-  /** The spoken line, at the bottom of its box. */
-  captions: Box & { show: boolean; size: number }
+  /** The spoken line, at the bottom of its box (anchor 'top': at the top). css: extra CSS
+   *  declarations for the caption itself, to match a talent's overlay (font, colours, border);
+   *  stylesheet: a stylesheet URL the page loads for it (e.g. a web font). */
+  captions: Box & {
+    show: boolean
+    size: number
+    anchor?: 'top' | 'bottom'
+    css?: string
+    stylesheet?: string
+  }
   /** Colour, and/or an image path under models_dir (served at /models/) or a URL. */
   background: { color: string; image: string }
   /** Where pictures the talent shows go; a picture fits inside the box. */
@@ -178,6 +186,14 @@ export function sceneFrom(o: Overrides): Scene {
     captions: {
       show: o.scene?.captions?.show ?? DEFAULT_SCENE.captions.show,
       size: o.scene?.captions?.size ?? DEFAULT_SCENE.captions.size,
+      ...(o.scene?.captions?.anchor === 'top' ? { anchor: 'top' as const } : {}),
+      ...(typeof o.scene?.captions?.css === 'string' && o.scene.captions.css
+        ? { css: o.scene.captions.css }
+        : {}),
+      ...(typeof o.scene?.captions?.stylesheet === 'string' &&
+      /^https?:\/\//.test(o.scene.captions.stylesheet)
+        ? { stylesheet: o.scene.captions.stylesheet }
+        : {}),
       ...clampBox({ ...DEFAULT_SCENE.captions, ...o.scene?.captions }, DEFAULT_SCENE.captions),
     },
     background: { ...DEFAULT_SCENE.background, ...o.scene?.background },

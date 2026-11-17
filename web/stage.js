@@ -268,10 +268,24 @@ function apply(cue) {
   }
 }
 
+/** One <link> for the caption's font stylesheet (scene.captions.stylesheet), swapped when it changes. */
+function useStylesheet(url) {
+  let el = document.getElementById('capfont')
+  if (!url) { el?.remove(); return }
+  if (el?.getAttribute('href') === url) return
+  if (!el) { el = document.createElement('link'); el.id = 'capfont'; el.rel = 'stylesheet'; document.head.appendChild(el) }
+  el.href = url
+}
+
 function applyScene(sc) {
   beatT0 = clock()
   scene = { motion: { ...scene.motion, ...sc.motion }, captions: { ...scene.captions, ...sc.captions }, background: { ...scene.background, ...sc.background }, screen: { ...scene.screen, ...sc.screen }, frames: sc.frames ?? scene.frames }
+  const shown = captionEl.style.display
+  captionEl.style.cssText = scene.captions.css || ''   // the talent's own caption style, if any
+  captionEl.style.display = shown
+  useStylesheet(scene.captions.stylesheet)
   captionEl.style.fontSize = `${scene.captions.size}px`
+  capBoxEl.style.alignItems = scene.captions.anchor === 'top' ? 'flex-start' : 'flex-end'
   if (!showCaptions()) captionEl.style.display = 'none'
   const bg = scene.background
   const img = bg.image ? (/^https?:\/\//.test(bg.image) ? bg.image : `/models/${bg.image}`) : ''

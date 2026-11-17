@@ -77,6 +77,22 @@ describe('persist', () => {
     expect(s.motion).toEqual(DEFAULT_SCENE.motion)
   })
 
+  test('sceneFrom keeps a caption anchor, css and http(s) stylesheet, and drops bad ones', () => {
+    const c = {
+      anchor: 'top',
+      css: 'color:red',
+      stylesheet: 'https://fonts.example/f.css',
+    } as const
+    expect(sceneFrom({ scene: { captions: c } }).captions).toEqual({
+      ...DEFAULT_SCENE.captions,
+      ...c,
+    })
+    const bad = sceneFrom({
+      scene: { captions: { anchor: 'middle', css: '', stylesheet: 'javascript:x' } as never },
+    }).captions
+    expect(bad).toEqual(DEFAULT_SCENE.captions)
+  })
+
   test('an unreadable file is ignored rather than crashing startup', () => {
     Bun.write(join(dir, 'bad.toml'), 'this = = not toml')
     expect(readOverrides('bad', dir)).toEqual({})
