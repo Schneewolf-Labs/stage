@@ -43,6 +43,8 @@ export interface Scene {
     lively?: number
     gaze?: number
     automood?: boolean
+    /** A cheer now and then on excited happy lines (core.bubblyReaction), for a bouncy talent. */
+    bubbly?: boolean
   }
   /** The spoken line, at the bottom of its box (anchor 'top': at the top). css: extra CSS
    *  declarations for the caption itself, to match a talent's overlay (font, colours, border);

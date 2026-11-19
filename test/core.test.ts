@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   bodyMotion,
+  bubblyReaction,
   clampBox,
   clampTransform,
   cleanFrames,
@@ -543,6 +544,12 @@ describe('body motion and auto moods', () => {
     }
   })
 
+  test('bubblyReaction cheers excited happy lines only', () => {
+    expect(bubblyReaction('I made you a fox!', 'happy')).toBe('cheer')
+    expect(bubblyReaction('Yay, it is done.', 'neutral')).toBe('cheer')
+    expect(bubblyReaction('Oh no, the hands!', 'surprised')).toBeNull()
+    expect(bubblyReaction('Here it is.', 'happy')).toBeNull()
+  })
   test('moodFromText hears a cheerful talent too', () => {
     expect(moodFromText('I love how cozy this one came out!')).toBe('happy')
     expect(moodFromText('Yay, a cute little fox for you!')).toBe('happy')

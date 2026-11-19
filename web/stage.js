@@ -13,7 +13,7 @@
  *  3. coreModel.*ParameterValueById wants CubismId handles, not strings; a string silently
  *     writes to a phantom slot. Parameters are addressed by index here.
  */
-import { REACTIONS, bodyMotion, clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, gazeAt, moodFromText, mouthAt, reactionAt, talkMotion } from './core.js'
+import { REACTIONS, bodyMotion, clampTransform, clipAt, cuesBetween, danceAt, eyeTarget, fitModel, gazeAt, bubblyReaction, moodFromText, mouthAt, reactionAt, talkMotion } from './core.js'
 import { place, renderEdit, renderFrames } from './widgets.js'
 
 const q = new URLSearchParams(location.search)
@@ -55,6 +55,7 @@ let expressions = {}, expWeight = {}
 let mood = 'neutral', moodAt = 0, state = 'idle', poseOn = 0, nodT = -1
 // Lively motion (scene.motion.lively): the running reaction and when it started; see core.reactionAt.
 let react = null, reactAt = 0, reactMoodTimer = null, gx = 0, gy = 0
+let bubblyAt = -1e9 // when motion.bubbly last started a cheer
 // Where fit() put the model; bodyMotion offsets are applied on top every frame. autoMood is the
 // mood moodFromText set for the sentence playing now, so it is cleared when that clip ends.
 let base = { x: 0, y: 0, scale: 1, h: 1 }, autoMood = null
@@ -211,6 +212,11 @@ async function pump() {
     if (scene.motion.automood && (mood === 'neutral' || mood === autoMood || clock() - moodAt > 4000)) {
       const md = moodFromText(cue.text)
       if (md) { mood = md; moodAt = clock(); autoMood = md }
+    }
+    // A bubbly talent bounces on excited happy lines, at most one cheer every few seconds.
+    if (scene.motion.bubbly && !react && clock() - bubblyAt > 3500) {
+      const k = bubblyReaction(cue.text, mood)
+      if (k) { react = k; reactAt = clock(); bubblyAt = reactAt }
     }
     send({ type: 'playing', id: cue.id })
     await new Promise((res) => { src.onended = res; trackStart = ac.currentTime; src.start() })

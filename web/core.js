@@ -408,6 +408,20 @@ const MOOD_CUES = [
  * @param {string} text
  * @returns {'happy'|'sad'|'angry'|'surprised'|null}
  */
+/**
+ * The reaction an excited line gets from a bubbly talent (scene.motion.bubbly): a cheer for a
+ * happy line that ends in "!" or says yay or hooray, so she bounces without having to write
+ * [cheer] herself. Stage rate-limits it; anything else is null.
+ * @param {string} text the spoken sentence
+ * @param {string} mood the face it is said with
+ * @returns {'cheer'|null}
+ */
+export function bubblyReaction(text, mood) {
+  const t = (text || '').trim()
+  if (/\b(yay|hooray|woohoo)\b/i.test(t)) return 'cheer'
+  return mood === 'happy' && t.endsWith('!') ? 'cheer' : null
+}
+
 export function moodFromText(text) {
   for (const [mood, re] of MOOD_CUES) if (re.test(text || '')) return mood
   return null
