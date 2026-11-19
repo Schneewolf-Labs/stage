@@ -11,6 +11,9 @@ export interface TwitchConfig {
   nick?: string
   token?: string
   reply: boolean
+  /** Also post what the talent says outside chat turns (director beats, /chat, /say): everything
+   *  its captions show. Needs nick and token, like reply. */
+  mirror?: boolean
   wake_words: string[]
   interval_ms: number
   max_batch: number
@@ -111,10 +114,13 @@ function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
     throw new Error(`${w}: set both nick and token to post, or neither to read anonymously`)
   const reply = raw.reply ?? false
   if (typeof reply !== 'boolean') throw new Error(`${w}.reply must be a boolean`)
+  const mirror = raw.mirror ?? false
+  if (typeof mirror !== 'boolean') throw new Error(`${w}.mirror must be a boolean`)
   return {
     channel: str(raw, 'channel', w).toLowerCase().replace(/^#/, ''),
     ...(nick ? { nick, token } : {}),
     reply,
+    ...(mirror ? { mirror } : {}),
     wake_words: strList(raw, 'wake_words', w, [name]),
     interval_ms: num(raw, 'interval_ms', 4000),
     max_batch: num(raw, 'max_batch', 6),

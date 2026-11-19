@@ -33,6 +33,17 @@ describe('parseConfig', () => {
     expect(parseConfig(TOML).talents.b?.egirl_token).toBeUndefined()
   })
 
+  test('twitch mirror is off unless set, and must be a boolean', () => {
+    const base = `${TOML}
+[talents.a.twitch]
+channel = "c"
+nick = "n"
+token = "t"
+`
+    expect(parseConfig(base).talents.a?.twitch?.mirror).toBeUndefined()
+    expect(parseConfig(`${base}mirror = true\n`).talents.a?.twitch?.mirror).toBe(true)
+    expect(() => parseConfig(`${base}mirror = "yes"\n`)).toThrow(/mirror must be a boolean/)
+  })
   test('parses the optional twitch table with defaults', () => {
     expect(parseConfig(TOML).talents.a?.twitch).toBeUndefined()
     const cfg = parseConfig(`${TOML}

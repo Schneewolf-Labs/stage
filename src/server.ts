@@ -171,7 +171,11 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
   const director = startDirector({
     get: () => directorFrom(overrides),
     isBusy: () => isBusy() || script.running,
-    turn: runTurn,
+    turn: (message) =>
+      runTurn(message).then((reply) => {
+        mirror(reply)
+        return reply
+      }),
     event: stage.event,
     log,
   })
@@ -180,6 +184,12 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
   let batcher: ChatBatcher | undefined
   let twitchPaused = false
   let twitchReply = talent.twitch?.reply ?? false
+  let twitchMirror = talent.twitch?.mirror ?? false
+  // Everything she says outside a chat turn goes to chat too when mirror is on (a chat turn's
+  // reply is posted by the batcher below, under `reply`).
+  const mirror = (text: string | undefined): void => {
+    if (twitchMirror && text?.trim()) twitch?.send(text)
+  }
   if (talent.twitch) {
     const tw = talent.twitch
     batcher = new ChatBatcher(
@@ -257,6 +267,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             dropped: batcher.dropped,
             paused: twitchPaused,
             reply: twitchReply,
+            mirror: twitchMirror,
           },
         }
       : {}),
@@ -357,12 +368,15 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           const rest = chunker.flush()
           if (rest) parts.push(rest)
           for (const part of parts) await speak(opts, part)
+          mirror(body.text)
           return json({ ok: true, sentences: parts.length })
         }
         if (path === '/chat') {
           if (typeof body.message !== 'string' || !body.message.trim())
             return json({ error: 'message required' }, 400)
-          return json({ ok: true, reply: await runTurn(body.message) })
+          const reply = await runTurn(body.message)
+          mirror(reply)
+          return json({ ok: true, reply })
         }
         if (path === '/interrupt') {
           // Stop talking now: the page cuts audio and drops its queue, clips still synthesizing
@@ -486,10 +500,11 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           if (!twitch || !batcher) return json({ error: 'this talent has no [twitch] table' }, 400)
           if (typeof body.paused === 'boolean') twitchPaused = body.paused
           if (typeof body.reply === 'boolean') twitchReply = body.reply
+          if (typeof body.mirror === 'boolean') twitchMirror = body.mirror
           log(
-            `twitch: ${twitchPaused ? 'paused' : 'listening'}, replies ${twitchReply ? 'on' : 'off'}`,
+            `twitch: ${twitchPaused ? 'paused' : 'listening'}, replies ${twitchReply ? 'on' : 'off'}, mirror ${twitchMirror ? 'on' : 'off'}`,
           )
-          return json({ ok: true, paused: twitchPaused, reply: twitchReply })
+          return json({ ok: true, paused: twitchPaused, reply: twitchReply, mirror: twitchMirror })
         }
         if (path === '/presets') {
           const name = presetName(body.name)
