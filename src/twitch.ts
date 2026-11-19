@@ -87,6 +87,10 @@ export interface TwitchOptions {
   onLine: (line: ChatLine) => void
   log: (msg: string) => void
   url?: string
+  /** How often to ping Twitch when the line is quiet, ms. */
+  pingMs?: number
+  /** Silence after which the connection counts as dead and is replaced, ms. */
+  staleMs?: number
 }
 
 export interface TwitchHandle {
@@ -100,12 +104,19 @@ export interface TwitchHandle {
  * Twitch chat over its IRC WebSocket. Reads anonymously as a `justinfan` when no nick and
  * token are configured. Reconnects with backoff on close or a server RECONNECT; a failed login
  * drops to anonymous rather than looping on the same bad token.
+ *
+ * A connection can also die without closing: after a network drop (2026-11-18, the office
+ * power cut) the socket stayed "open", nothing arrived for hours, and Niku never heard chat
+ * until Stage was restarted. So the client pings when the line is quiet, and a connection that
+ * has heard nothing at all for `staleMs` is dropped and replaced.
  */
 export function startTwitch({
   cfg,
   onLine,
   log,
   url = TWITCH_IRC_URL,
+  pingMs = 60_000,
+  staleMs = 150_000,
 }: TwitchOptions): TwitchHandle {
   let auth = cfg.nick && cfg.token ? { nick: cfg.nick, token: cfg.token } : undefined
   let ws: WebSocket | undefined
@@ -114,6 +125,7 @@ export function startTwitch({
   let attempt = 0
   let sent = 0
   let warnedReadOnly = false
+  let heard = Date.now()
 
   const handle = (msg: IrcMessage): void => {
     switch (msg.command) {
@@ -156,6 +168,7 @@ export function startTwitch({
       sock.send(`JOIN #${cfg.channel}`)
     }
     sock.onmessage = (ev) => {
+      if (ws === sock) heard = Date.now()
       for (const raw of String(ev.data).split('\r\n')) {
         const msg = parseIrcLine(raw)
         if (msg) handle(msg)
@@ -172,6 +185,23 @@ export function startTwitch({
   }
   connect()
 
+  // Keepalive: ping a quiet line; replace a connection that has gone silent.
+  const keepalive = setInterval(
+    () => {
+      if (closed || !ws || ws.readyState !== WebSocket.OPEN) return
+      if (Date.now() - heard > staleMs) {
+        log(`twitch: nothing heard for ${Math.round((Date.now() - heard) / 1000)}s, reconnecting`)
+        const dead = ws
+        connected = false
+        heard = Date.now()
+        ws = undefined // its close, whenever it comes, is not ours to retry
+        dead.close()
+        connect()
+      } else if (Date.now() - heard > pingMs) ws.send('PING :stage')
+    },
+    Math.max(10, Math.min(pingMs, staleMs) / 2),
+  )
+
   return {
     send(text) {
       if (!auth) {
@@ -187,6 +217,7 @@ export function startTwitch({
     stats: () => ({ connected, sent }),
     close() {
       closed = true
+      clearInterval(keepalive)
       ws?.close()
     },
   }

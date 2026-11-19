@@ -174,6 +174,37 @@ describe('startTwitch against a fake Twitch', () => {
     }
   })
 
+  test('a line that goes silent is pinged, then replaced; an answer keeps it', async () => {
+    const fake = fakeTwitch()
+    const logs: string[] = []
+    const tw = startTwitch({
+      cfg: { ...cfg, nick: undefined, token: undefined },
+      onLine: () => {},
+      log: (m) => logs.push(m),
+      url: fake.url,
+      pingMs: 40,
+      staleMs: 200,
+    })
+    try {
+      await until(() => fake.received.length >= 3)
+      fake.push(':tmi.twitch.tv 001 justinfan1 :Welcome, GLHF!')
+      await until(() => tw.stats().connected)
+      // Quiet line: the client pings; answering keeps the same connection.
+      await until(() => fake.received.includes('PING :stage'))
+      for (let i = 0; i < 6; i++) {
+        fake.push(':tmi.twitch.tv PONG tmi.twitch.tv :stage')
+        await Bun.sleep(50)
+      }
+      expect(fake.opened()).toBe(1)
+      // Then nothing at all: the connection is dropped and a new one opens.
+      await until(() => fake.opened() === 2, 2000)
+      expect(logs.some((m) => /nothing heard for \d+s, reconnecting/.test(m))).toBe(true)
+    } finally {
+      tw.close()
+      fake.stop()
+    }
+  })
+
   test('authenticated handshake sends PASS before NICK and can post', async () => {
     const fake = fakeTwitch()
     const tw = startTwitch({
