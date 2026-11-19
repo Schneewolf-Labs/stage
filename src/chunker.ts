@@ -3,6 +3,11 @@ import type { Mood } from './types'
 const MOODS: readonly Mood[] = ['neutral', 'happy', 'sad', 'angry', 'surprised']
 const GESTURES = ['nod', 'pose'] as const
 export type Gesture = (typeof GESTURES)[number]
+/** Short body reactions (web/core.js REACTIONS) a persona can write inline; bounce and yay are
+ *  friendlier words for cheer. */
+const REACTIONS = ['cheer', 'smug', 'sulk', 'shock', 'flinch'] as const
+export type Reaction = (typeof REACTIONS)[number]
+const REACTION_ALIASES: Record<string, Reaction> = { bounce: 'cheer', yay: 'cheer' }
 
 export interface LineImage {
   url: string
@@ -14,6 +19,7 @@ export interface Line {
   text: string
   moods: Mood[]
   gestures: Gesture[]
+  reactions: Reaction[]
   /** Pictures the talent wants shown: markdown images and bare image URLs. */
   images: LineImage[]
 }
@@ -33,6 +39,7 @@ const UNSPEAKABLE =
 export function parseLine(chunk: string): Line {
   const moods: Mood[] = []
   const gestures: Gesture[] = []
+  const reactions: Reaction[] = []
   const images: LineImage[] = []
   const text = chunk
     .replace(MD_IMAGE, (_, alt: string, url: string) => {
@@ -50,11 +57,13 @@ export function parseLine(chunk: string): Line {
       const t = tag.toLowerCase()
       if ((MOODS as readonly string[]).includes(t)) moods.push(t as Mood)
       else if ((GESTURES as readonly string[]).includes(t)) gestures.push(t as Gesture)
+      else if ((REACTIONS as readonly string[]).includes(t)) reactions.push(t as Reaction)
+      else if (REACTION_ALIASES[t]) reactions.push(REACTION_ALIASES[t])
       return ' '
     })
     .replace(/\s+/g, ' ')
     .trim()
-  return { text, moods, gestures, images }
+  return { text, moods, gestures, reactions, images }
 }
 
 /**

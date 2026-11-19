@@ -25,7 +25,7 @@ export interface PerformOptions {
 }
 
 /**
- * Speak one chunk of text: strip cue tags, apply moods and gestures, synthesize, enqueue.
+ * Speak one chunk of text: strip cue tags, apply moods, gestures and reactions, synthesize, enqueue.
  * Clips are synthesized in order and pushed in order; the page plays them in order.
  */
 export async function speak(opts: PerformOptions, chunk: string): Promise<void> {
@@ -33,6 +33,7 @@ export async function speak(opts: PerformOptions, chunk: string): Promise<void> 
   const line = parseLine(chunk)
   for (const m of line.moods) stage.cue({ type: 'mood', mood: m })
   for (const g of line.gestures) stage.cue({ type: 'gesture', name: g satisfies Gesture })
+  for (const r of line.reactions) stage.cue({ type: 'react', kind: r })
   for (const img of line.images) stage.cue({ type: 'image', url: img.url, caption: img.caption })
   if (!line.text) return
   if (stage.muted()) {

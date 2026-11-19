@@ -399,7 +399,7 @@ const MOOD_CUES = [
   ['surprised', /\b(ow+|ouch|whoa|wait,|what\?|huh|yikes|oh no)\b|!\?/i],
   ['angry', /\b(stole|steal|rude|how dare|cheap shot|avenge|revenge|grr+)\b/i],
   ['sad', /\b(lost|losing|defeat|ugh|sigh|unlucky|not my day)\b/i],
-  ['happy', /\b(calculated|nice|perfect|easy|ha+|hehe|got (?:him|her|them|it)|victory|won|tier up|yes!)\b/i],
+  ['happy', /\b(calculated|nice|perfect|easy|ha+|hehe|got (?:him|her|them|it)|victory|won|tier up|yes!|love|lovely|cute|adorable|yay|hooray|so happy|can't wait|awesome|amazing|sweet|fun)\b/i],
 ]
 
 /**

@@ -543,6 +543,10 @@ describe('body motion and auto moods', () => {
     }
   })
 
+  test('moodFromText hears a cheerful talent too', () => {
+    expect(moodFromText('I love how cozy this one came out!')).toBe('happy')
+    expect(moodFromText('Yay, a cute little fox for you!')).toBe('happy')
+  })
   test('moodFromText reads clear cues and leaves plain lines alone', () => {
     expect(moodFromText('Two shots, two hits. Calculated.')).toBe('happy')
     expect(moodFromText('Ow! That one hurt.')).toBe('surprised')

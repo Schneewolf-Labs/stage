@@ -43,6 +43,15 @@ describe('parseLine', () => {
   })
 })
 
+describe('parseLine reactions', () => {
+  test('reaction tags become reactions, with bounce and yay as cheer', () => {
+    const l = parseLine('[happy] [cheer] Yay, it is done! [bounce] [smug] [yay]')
+    expect(l.text).toBe('Yay, it is done!')
+    expect(l.moods).toEqual(['happy'])
+    expect(l.reactions).toEqual(['cheer', 'cheer', 'smug', 'cheer'])
+  })
+})
+
 describe('parseLine unspeakables', () => {
   test('emoji and music symbols are dropped', () => {
     expect(parseLine('🎶 Victory tonight 🎶 ♪ okay 👍🏽').text).toBe('Victory tonight okay')
