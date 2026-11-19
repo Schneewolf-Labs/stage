@@ -20,6 +20,10 @@ export interface Line {
 
 const MD_IMAGE = /!\[([^\]]*)\]\((\S+?)\)/g
 const BARE_IMAGE = /https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|avif)(?=[\s)\]]|$)/gi
+/** Emoji (with their joiners and variation selectors) and music symbols: a voice cannot say
+ *  them, and a small model writes them anyway ("🎶 victory song 🎶") however the persona asks. */
+const UNSPEAKABLE =
+  /\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}]|\u200D|\uFE0F|[\u2669-\u266C]/gu
 
 /**
  * Pull `[happy]`, `[nod]` style cue tags out of a chunk of text. Tags the persona writes inline
@@ -39,6 +43,9 @@ export function parseLine(chunk: string): Line {
       images.push({ url, caption: '' })
       return ' '
     })
+    .replace(UNSPEAKABLE, ' ')
+    // Markdown emphasis: keep the words, lose the asterisks ("*very* proud" -> "very proud").
+    .replace(/\*+/g, '')
     .replace(/\[([a-z]+)\]/gi, (_, tag: string) => {
       const t = tag.toLowerCase()
       if ((MOODS as readonly string[]).includes(t)) moods.push(t as Mood)

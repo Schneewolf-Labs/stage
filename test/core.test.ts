@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  bodyMotion,
+  clampBox,
   clampTransform,
+  cleanFrames,
   clipAt,
   clipStats,
   contextUse,
@@ -10,11 +13,20 @@ import {
   encodeWav,
   eyeTarget,
   fitModel,
+  gazeAt,
+  legacyScreenBox,
+  moodFromText,
   mouthAt,
+  moveBox,
+  REACTIONS,
+  reactionAt,
   readiness,
+  resizeBox,
   riskyReach,
   riskyTools,
+  talkMotion,
   turnReducer,
+  widgetPatch,
 } from '../web/core.js'
 
 describe('turnReducer', () => {
@@ -398,5 +410,144 @@ describe('danceAt', () => {
     expect(half.fx).toBeCloseTo(full.fx / 2, 5)
     expect(half.tilt).toBeCloseTo(full.tilt / 2, 5)
     expect(danceAt(beat, 120, 0)).toEqual({ fx: 0, fy: 0, tilt: 0, body: 0 })
+  })
+})
+
+describe('widget boxes', () => {
+  test('clampBox keeps a box on the canvas, at least a little big, and fills junk from a fallback', () => {
+    expect(clampBox({ x: 0.9, y: -0.2, w: 0.3, h: 0.3 })).toEqual({ x: 0.7, y: 0, w: 0.3, h: 0.3 })
+    expect(clampBox({ x: 0.5, y: 0.5, w: 0.001, h: 2 })).toEqual({ x: 0.5, y: 0, w: 0.03, h: 1 })
+    const fb = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }
+    expect(clampBox({ x: 'a', y: Number.NaN }, fb)).toEqual(fb)
+  })
+
+  test('moveBox slides without changing size and stops at the edges', () => {
+    const b = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 }
+    expect(moveBox(b, 0.1, -0.1)).toEqual({ x: 0.5, y: 0.3, w: 0.2, h: 0.2 })
+    expect(moveBox(b, 1, 1)).toEqual({ x: 0.8, y: 0.8, w: 0.2, h: 0.2 })
+  })
+
+  test('resizeBox drags the bottom-right corner, never below the minimum or off the canvas', () => {
+    const b = { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }
+    expect(resizeBox(b, 0.1, 0.05)).toEqual({ x: 0.5, y: 0.5, w: 0.3, h: 0.25 })
+    expect(resizeBox(b, -1, -1)).toEqual({ x: 0.5, y: 0.5, w: 0.03, h: 0.03 })
+    expect(resizeBox(b, 1, 1)).toEqual({ x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
+  })
+
+  test('legacyScreenBox keeps centre and width; the height fits a square picture on 16:9', () => {
+    const b = legacyScreenBox({ x: 0, y: 0, w: 0.36 })
+    expect(b.w).toBeCloseTo(0.36)
+    expect(b.h).toBeCloseTo(0.64)
+    expect(b.x).toBeCloseTo(0.32)
+    expect(b.y).toBeCloseTo(0.18)
+  })
+
+  test('widgetPatch turns a dragged widget into the /scene body that places it', () => {
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }
+    const scene = {
+      frames: [
+        { id: 'a', url: 'http://a', show: true, x: 0, y: 0, w: 0.1, h: 0.1 },
+        { id: 'b', url: 'http://b', show: false, x: 0, y: 0, w: 0.1, h: 0.1 },
+      ],
+    }
+    expect(widgetPatch(scene, 'screen', box)).toEqual({ screen: box })
+    expect(widgetPatch(scene, 'captions', box)).toEqual({ captions: box })
+    const p = widgetPatch(scene, 'frame:b', box) as { frames: { id: string }[] }
+    expect(p.frames).toEqual([scene.frames[0], { ...scene.frames[1], ...box }])
+    expect(widgetPatch(scene, 'frame:zzz', box)).toEqual({})
+  })
+
+  test('cleanFrames keeps http(s) frames, assigns ids, defaults show on, and caps the count', () => {
+    const out = cleanFrames([
+      { url: 'http://niku:8300/overlay', x: 0.02, y: 0.5, w: 0.2, h: 0.45 },
+      { url: 'javascript:alert(1)' },
+      { url: 'https://example.com/chat', id: 'chat', show: false },
+      'nope',
+      ...Array.from({ length: 10 }, (_, i) => ({ url: `http://x/${i}` })),
+    ])
+    expect(out).toHaveLength(8)
+    expect(out[0]).toEqual({
+      id: 'frame-1',
+      url: 'http://niku:8300/overlay',
+      show: true,
+      x: 0.02,
+      y: 0.5,
+      w: 0.2,
+      h: 0.45,
+    })
+    expect(out[1]).toMatchObject({ id: 'chat', show: false, url: 'https://example.com/chat' })
+    expect(new Set(out.map((f) => f.id)).size).toBe(8)
+    expect(cleanFrames('nope')).toEqual([])
+  })
+})
+
+describe('lively motion', () => {
+  test('gazeAt is deterministic, bounded, and visits the content side', () => {
+    let content = 0,
+      camera = 0
+    for (let t = 0; t < 600; t += 0.5) {
+      const a = gazeAt(t, -1),
+        b = gazeAt(t, -1)
+      expect(a).toEqual(b)
+      expect(Math.abs(a.x)).toBeLessThanOrEqual(0.8)
+      expect(Math.abs(a.y)).toBeLessThanOrEqual(0.3)
+      if (a.at === 'content') content++
+      if (a.at === 'camera') camera++
+    }
+    expect(content).toBeGreaterThan(100)
+    expect(camera).toBeGreaterThan(100)
+  })
+
+  test('gazeAt never looks at content when there is none', () => {
+    for (let t = 0; t < 300; t += 0.5) expect(gazeAt(t, 0).at).not.toBe('content')
+  })
+
+  test('talkMotion is still when silent and moves when talking', () => {
+    const still = talkMotion(0, 3)
+    expect(Math.abs(still.fy) + Math.abs(still.tilt) + Math.abs(still.body)).toBe(0)
+    const m = talkMotion(1, 3)
+    expect(Math.abs(m.fy) + Math.abs(m.tilt)).toBeGreaterThan(0)
+  })
+
+  test('reactionAt runs for its duration and then ends', () => {
+    for (const kind of Object.keys(REACTIONS)) {
+      expect(reactionAt(kind, 0.05)).not.toBeNull()
+      expect(reactionAt(kind, REACTIONS[kind][0] + 0.01)).toBeNull()
+    }
+    expect(reactionAt('nope', 0.1)).toBeNull()
+  })
+})
+
+describe('body motion and auto moods', () => {
+  test('bodyMotion stays small at rest and grows while talking', () => {
+    for (let t = 0; t < 30; t += 0.1) {
+      const r = bodyMotion(t, 0, 0, null, 0)
+      expect(Math.abs(r.dy)).toBeLessThan(0.01)
+      expect(Math.abs(r.rot)).toBeLessThan(1)
+      expect(r.sx).toBe(1)
+    }
+    let most = 0
+    for (let t = 0; t < 5; t += 0.05)
+      most = Math.max(most, Math.abs(bodyMotion(t, 1, 0, null, 0).dy))
+    expect(most).toBeGreaterThan(0.01)
+  })
+
+  test('a cheer hops and every reaction ends', () => {
+    let peak = 0
+    for (let s = 0; s < REACTIONS.cheer[0]; s += 0.02)
+      peak = Math.min(peak, bodyMotion(0, 0, 0, 'cheer', s).dy)
+    expect(peak).toBeLessThan(-0.03)
+    for (const kind of Object.keys(REACTIONS)) {
+      const after = bodyMotion(0, 0, 0, kind, REACTIONS[kind][0] + 0.5)
+      expect(after).toEqual(bodyMotion(0, 0, 0, null, 0))
+    }
+  })
+
+  test('moodFromText reads clear cues and leaves plain lines alone', () => {
+    expect(moodFromText('Two shots, two hits. Calculated.')).toBe('happy')
+    expect(moodFromText('Ow! That one hurt.')).toBe('surprised')
+    expect(moodFromText('Puska stole my point.')).toBe('angry')
+    expect(moodFromText('We lost this one.')).toBe('sad')
+    expect(moodFromText('Moving up to the ridge.')).toBeNull()
   })
 })

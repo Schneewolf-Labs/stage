@@ -1,4 +1,4 @@
-import type { Scene, Transform } from '../src/persist'
+import type { Box, Frame, Scene, Transform } from '../src/persist'
 
 export interface Sentence { id: string; text: string; status: 'queued' | 'now' | 'done' }
 export interface ToolChip { name: string; args?: string; done: boolean; ok?: boolean }
@@ -28,3 +28,15 @@ export function mouthAt(track: MouthTrack | null | undefined, t: number): { open
 export function riskyReach(info: { peers?: number; mcp?: string[] } | null | undefined): string[]
 export function eyeTarget(mood: string, hasSmile: boolean, since: number): { eye: number; smile: number }
 export function danceAt(t: number, bpm: number, sway: number): { fx: number; fy: number; tilt: number; body: number }
+export function clampBox(b: Partial<Record<keyof Box, unknown>> | undefined | null, fallback?: Box): Box
+export function moveBox(b: Box, dx: number, dy: number): Box
+export function resizeBox(b: Box, dw: number, dh: number): Box
+export function legacyScreenBox(s: { x?: number; y?: number; w?: number } | undefined | null): Box
+export function cleanFrames(list: unknown): Frame[]
+export function widgetPatch(scene: Pick<Scene, 'frames'>, key: string, box: Box): Partial<Pick<Scene, 'screen' | 'captions' | 'frames'>> | { screen: Box } | { captions: Box }
+export function gazeAt(t: number, gazeX?: number): { x: number; y: number; at: 'camera' | 'content' | 'away' }
+export function talkMotion(level: number, t: number): { fy: number; tilt: number; body: number }
+export const REACTIONS: Record<string, [number, string | null]>
+export function reactionAt(kind: string, s: number): { fx: number; fy: number; tilt: number; body: number } | null
+export function bodyMotion(t: number, level: number, gaze: number, kind: string | null, s: number): { dy: number; rot: number; sx: number; sy: number }
+export function moodFromText(text: string): 'happy' | 'sad' | 'angry' | 'surprised' | null

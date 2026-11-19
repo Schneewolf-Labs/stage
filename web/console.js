@@ -208,10 +208,32 @@ function applySceneUI(sc) {
   $('capShow').checked = sc.captions.show; setRange('capSize', 'capSizeVal', sc.captions.size, (v) => v)
   if (sc.background.color) $('bgColor').value = sc.background.color
   $('bgImage').value = sc.background.image || ''
-  if (sc.screen) { setRange('sx', 'sxVal', sc.screen.x, (v) => v.toFixed(2)); setRange('sy', 'syVal', sc.screen.y, (v) => v.toFixed(2)); setRange('sw', 'swVal', sc.screen.w, (v) => Math.round(v * 100)) }
+  $('screenShow').checked = sc.screen?.show !== false
+  S.frames = sc.frames ?? []
+  renderFrameList()
 }
-const pushScreen = debounce(() => post('/scene', { screen: { x: Number($('sx').value), y: Number($('sy').value), w: Number($('sw').value) } }), 120)
-bindRange('sx', 'sxVal', (v) => v.toFixed(2), pushScreen); bindRange('sy', 'syVal', (v) => v.toFixed(2), pushScreen); bindRange('sw', 'swVal', (v) => Math.round(v * 100), pushScreen)
+/* Widgets: placement is dragged in the preview (widgets.js); here, what is shown and which frames exist. */
+$('screenShow').addEventListener('change', () => post('/scene', { screen: { show: $('screenShow').checked } }))
+const NEW_FRAME = { x: 0.02, y: 0.5, w: 0.25, h: 0.45 }
+function renderFrameList() {
+  $('frameList').replaceChildren(...(S.frames ?? []).map((f) => {
+    const row = document.createElement('div'); row.className = 'copyrow'
+    const lab = document.createElement('label'); lab.className = 'field row'
+    const box = document.createElement('input'); box.type = 'checkbox'; box.checked = f.show
+    const name = document.createElement('span'); name.textContent = `Frame: ${f.url}`
+    lab.append(box, name)
+    const rm = document.createElement('button'); rm.className = 'btn ghost'; rm.textContent = 'Remove'
+    box.addEventListener('change', () => post('/scene', { frames: S.frames.map((g) => (g.id === f.id ? { ...g, show: box.checked } : g)) }))
+    rm.addEventListener('click', () => post('/scene', { frames: S.frames.filter((g) => g.id !== f.id) }))
+    row.append(lab, rm)
+    return row
+  }))
+}
+$('btnFrameAdd').addEventListener('click', () => {
+  const url = $('frameUrl').value.trim()
+  if (!/^https?:\/\//.test(url)) return toast('A frame needs an http(s) URL')
+  post('/scene', { frames: [...(S.frames ?? []), { url, ...NEW_FRAME }] }).then(() => { $('frameUrl').value = '' })
+})
 $('btnTestImage').addEventListener('click', () => post('/image', { url: '/models/' + (S.modelList.find((m) => m.icon)?.icon?.replace(/^\/models\//, '') || ''), caption: 'test picture', seconds: 8 }))
 $('btnClearImage').addEventListener('click', () => post('/image', { url: null }))
 $('btnBgImage').addEventListener('click', () => post('/scene', { background: { image: $('bgImage').value.trim() } }))

@@ -68,6 +68,63 @@ export function clampTransform(t) {
   return { x: clamp(n(t?.x, 0), -1, 1), y: clamp(n(t?.y, 0), -1, 1), scale: clamp(n(t?.scale, 1), 0.1, 4) }
 }
 
+/* ---- widgets: boxes as fractions of the canvas, top-left corner and size, 0..1 ---- */
+
+const MIN_BOX = 0.03
+const MAX_FRAMES = 8
+const DEFAULT_FRAME_BOX = { x: 0.02, y: 0.5, w: 0.25, h: 0.45 }
+const r4 = (v) => Math.round(v * 1e4) / 1e4
+const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+
+/** A box that stays on the canvas and is at least a little big; junk fields come from `fallback`. */
+export function clampBox(b, fallback = DEFAULT_FRAME_BOX) {
+  const w = r4(clamp(num(b?.w, fallback.w), MIN_BOX, 1))
+  const h = r4(clamp(num(b?.h, fallback.h), MIN_BOX, 1))
+  return { x: r4(clamp(num(b?.x, fallback.x), 0, 1 - w)), y: r4(clamp(num(b?.y, fallback.y), 0, 1 - h)), w, h }
+}
+
+/** Slide a box by a fraction of the canvas, keeping its size. */
+export function moveBox(b, dx, dy) {
+  return clampBox({ ...b, x: b.x + dx, y: b.y + dy }, b)
+}
+
+/** Drag a box's bottom-right corner. */
+export function resizeBox(b, dw, dh) {
+  return clampBox({ ...b, w: Math.min(b.w + dw, 1 - b.x), h: Math.min(b.h + dh, 1 - b.y) }, b)
+}
+
+/**
+ * A screen saved before widgets: centre in -1..1 and a width. Keep both; the height is what a
+ * square picture took on a 16:9 canvas, which is what that screen showed.
+ */
+export function legacyScreenBox(s) {
+  const w = num(s?.w, 0.4)
+  const h = Math.min(1, (w * 16) / 9)
+  return clampBox({ x: 0.5 + num(s?.x, 0) / 2 - w / 2, y: 0.5 + num(s?.y, 0) / 2 - h / 2, w, h })
+}
+
+/** Frames (a URL in a box) from untrusted input: http(s) only, unique ids, shown by default. */
+export function cleanFrames(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  for (const f of list) {
+    if (out.length >= MAX_FRAMES) break
+    if (!f || typeof f !== 'object' || typeof f.url !== 'string' || !/^https?:\/\//.test(f.url)) continue
+    let id = typeof f.id === 'string' && f.id.trim() ? f.id.trim().slice(0, 40) : `frame-${out.length + 1}`
+    while (out.some((o) => o.id === id)) id = `${id}-${out.length + 1}`
+    out.push({ id, url: f.url.slice(0, 2000), show: f.show !== false, ...clampBox(f) })
+  }
+  return out
+}
+
+/** The /scene body for a widget dragged to `box`: `screen`, `captions`, or `frame:<id>`. */
+export function widgetPatch(scene, key, box) {
+  if (key === 'screen' || key === 'captions') return { [key]: box }
+  const id = key.startsWith('frame:') ? key.slice('frame:'.length) : null
+  if (!id || !scene.frames.some((f) => f.id === id)) return {}
+  return { frames: scene.frames.map((f) => (f.id === id ? { ...f, ...box } : f)) }
+}
+
 /** Pixel placement for a model: fit to 95% of the screen height at identity, then offset/scale. */
 export function fitModel(screen, model, t) {
   const base = Math.min(screen.w / model.w, screen.h / model.h) * 0.95
@@ -202,4 +259,156 @@ export function danceAt(t, bpm, sway) {
     tilt: Math.sin((Math.PI * beat) / 2 + 0.6) * 8 * sway,
     body: Math.sin((Math.PI * beat) / 2 + 0.3) * 4 * sway,
   }
+}
+
+// ----- Lively motion (opt-in: scene.motion.lively > 0) -------------------------------------
+//
+// A talent with no motions and no expressions -- chb119 has 17 parameters and nothing else --
+// otherwise only ever sways. These three functions give it something to do from the parameters
+// every model has: where it looks, how its head moves while it talks, and short reactions to
+// events. Pure and deterministic so they can be tested and so a rendered reel looks the same
+// every time; stage.js only applies what they return.
+
+// Cheap deterministic hash -> [0, 1).
+const hash01 = (n) => {
+  const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453
+  return s - Math.floor(s)
+}
+
+/**
+ * Where the talent looks at time t, as focus-controller coordinates (-1..1, +y up).
+ * Gaze holds for 3-8 s at a time, then moves: mostly at the camera, often at the content
+ * (gazeX: the side the game or screen is on, -1 left .. 1 right), sometimes a short glance
+ * away. Moves ease over ~0.35 s so it reads as a look, not a snap.
+ * @param {number} t seconds
+ * @param {number} gazeX side of the content, -1..1 (0 = no content to look at)
+ * @returns {{x: number, y: number, at: 'camera' | 'content' | 'away'}}
+ */
+export function gazeAt(t, gazeX = 0) {
+  // Segment boundaries: each segment's length is drawn from its index, so any t maps to one.
+  let start = 0, i = 0
+  while (true) {
+    const len = 3 + hash01(i) * 5
+    if (start + len > t) break
+    start += len; i++
+    if (i > 100000) break
+  }
+  const pick = (k) => {
+    const r = hash01(k * 7.13 + 1)
+    if (gazeX !== 0 && r < 0.4) return { x: gazeX * 0.75, y: -0.15, at: 'content' }
+    if (r > 0.88) return { x: (hash01(k + 3.3) - 0.5) * 1.2, y: 0.25, at: 'away' }
+    return { x: (hash01(k + 9.1) - 0.5) * 0.2, y: 0, at: 'camera' }
+  }
+  const now = pick(i), prev = i > 0 ? pick(i - 1) : now
+  const k = Math.min(1, (t - start) / 0.35)
+  const e = k * k * (3 - 2 * k)
+  return { x: prev.x + (now.x - prev.x) * e, y: prev.y + (now.y - prev.y) * e, at: now.at }
+}
+
+/**
+ * Head motion that rides on speech: a small bob and tilt that follow the mouth level, so
+ * a talking head does not stay perfectly still while only its mouth moves.
+ * @param {number} level mouth openness 0..1 (what drives ParamMouthOpenY)
+ * @param {number} t seconds
+ * @returns {{fy: number, tilt: number, body: number}}
+ */
+export function talkMotion(level, t) {
+  const l = Math.max(0, Math.min(1, level))
+  return {
+    fy: -l * 0.16 * (0.6 + 0.4 * Math.sin(t * 6.5)),
+    tilt: Math.sin(t * 1.7) * l * 5,
+    body: Math.sin(t * 1.1 + 0.4) * l * 3,
+  }
+}
+
+/** Reactions: kind -> [duration s, mood or null]. */
+export const REACTIONS = {
+  flinch: [0.7, 'surprised'],
+  shock: [1.6, 'surprised'],
+  cheer: [1.4, 'happy'],
+  smug: [2.2, 'happy'],
+  sulk: [2.4, 'sad'],
+}
+
+/**
+ * A reaction's motion `s` seconds after it started, or null once it is over. Envelopes rise
+ * fast and settle slowly, the way a body reacts.
+ * @param {string} kind a REACTIONS key
+ * @param {number} s seconds since the reaction began
+ * @returns {{fx: number, fy: number, tilt: number, body: number} | null}
+ */
+export function reactionAt(kind, s) {
+  const spec = REACTIONS[kind]
+  if (!spec || s < 0 || s > spec[0]) return null
+  const p = s / spec[0]
+  const env = Math.sin(Math.PI * Math.min(1, p * 2.5)) ** 2 * (1 - p) // fast attack, slow release
+  const settle = Math.exp(-4 * p)
+  switch (kind) {
+    case 'flinch': return { fx: -0.25 * settle, fy: 0.3 * settle, tilt: -10 * settle, body: -6 * settle }
+    case 'shock': return { fx: 0, fy: 0.45 * settle, tilt: 6 * Math.sin(s * 18) * settle, body: -8 * settle }
+    case 'cheer': return { fx: 0, fy: -0.35 * Math.abs(Math.sin(s * 9)) * (1 - p), tilt: 8 * Math.sin(s * 4.5) * (1 - p), body: 6 * Math.sin(s * 4.5) * (1 - p) }
+    case 'smug': return { fx: 0.2 * env, fy: -0.1 * env, tilt: 12 * Math.min(1, s * 3) * (1 - p * p), body: 3 * env }
+    case 'sulk': return { fx: -0.2 * (1 - p), fy: -0.35 * (1 - p), tilt: -5 * (1 - p), body: -3 * (1 - p) }
+  }
+  return null
+}
+
+/**
+ * Whole-body motion: offsets applied to the model sprite itself, for rigs that cannot move
+ * their own head vertically (chb119 has no ParamAngleY, so every nod and bob sent through the
+ * focus controller only ever moved the eyes). A gentle bob and sway at rest, bounce and lean
+ * while talking, a lean towards where it is looking, and each reaction's body language.
+ * @param {number} t seconds
+ * @param {number} level mouth openness 0..1
+ * @param {number} gaze current horizontal gaze, -1..1
+ * @param {string|null} kind running reaction (REACTIONS key) or null
+ * @param {number} s seconds since that reaction began
+ * @returns {{dy: number, rot: number, sx: number, sy: number}} dy as a fraction of the model's
+ *   height (+ is down), rot in degrees, sx/sy scale multipliers (squash and stretch)
+ */
+export function bodyMotion(t, level, gaze, kind, s) {
+  const l = Math.max(0, Math.min(1, level))
+  let dy = Math.sin(t * 1.6) * 0.004 - l * 0.012 * Math.abs(Math.sin(t * 7))
+  let rot = Math.sin(t * 0.45) * 0.6 + Math.sin(t * 2.2) * l * 1.2 + gaze * 1.5
+  let sx = 1, sy = 1
+  const spec = kind ? REACTIONS[kind] : null
+  if (spec && s >= 0 && s <= spec[0]) {
+    const p = s / spec[0]
+    const settle = Math.exp(-5 * p)
+    switch (kind) {
+      case 'cheer': {
+        // Two hops, squashing on each landing.
+        const hop = Math.abs(Math.sin(s * 7)) * (1 - p)
+        dy -= 0.05 * hop
+        const land = 1 - hop
+        sy *= 1 - 0.05 * land * (1 - p); sx *= 1 + 0.04 * land * (1 - p)
+        rot += Math.sin(s * 5) * 3 * (1 - p)
+        break
+      }
+      case 'flinch': dy += 0.015 * settle; rot -= 4 * settle; sx *= 1 - 0.03 * settle; break
+      case 'shock': dy -= 0.03 * Math.exp(-9 * p); sy *= 1 + 0.05 * settle; rot += Math.sin(s * 20) * 1.5 * settle; break
+      case 'smug': rot += 5 * Math.min(1, s * 4) * (1 - p * p); dy += 0.006 * Math.min(1, s * 4) * (1 - p); break
+      case 'sulk': dy += 0.02 * (1 - p); sy *= 1 - 0.03 * (1 - p); rot -= 2 * (1 - p); break
+    }
+  }
+  return { dy, rot, sx, sy }
+}
+
+// Word cues for moodFromText, checked in order: the first that matches wins.
+const MOOD_CUES = [
+  ['surprised', /\b(ow+|ouch|whoa|wait,|what\?|huh|yikes|oh no)\b|!\?/i],
+  ['angry', /\b(stole|steal|rude|how dare|cheap shot|avenge|revenge|grr+)\b/i],
+  ['sad', /\b(lost|losing|defeat|ugh|sigh|unlucky|not my day)\b/i],
+  ['happy', /\b(calculated|nice|perfect|easy|ha+|hehe|got (?:him|her|them|it)|victory|won|tier up|yes!)\b/i],
+]
+
+/**
+ * A mood for a spoken sentence, for talents whose model rarely writes cue tags itself. Only
+ * clear word cues count; anything else is null, so a plain sentence keeps the current mood.
+ * @param {string} text
+ * @returns {'happy'|'sad'|'angry'|'surprised'|null}
+ */
+export function moodFromText(text) {
+  for (const [mood, re] of MOOD_CUES) if (re.test(text || '')) return mood
+  return null
 }

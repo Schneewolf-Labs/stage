@@ -43,6 +43,25 @@ describe('parseLine', () => {
   })
 })
 
+describe('parseLine unspeakables', () => {
+  test('emoji and music symbols are dropped', () => {
+    expect(parseLine('🎶 Victory tonight 🎶 ♪ okay 👍🏽').text).toBe('Victory tonight okay')
+    expect(parseLine('Family 👨‍👩‍👧 time ❤️').text).toBe('Family time')
+  })
+
+  test('asterisks go, the words they wrapped stay', () => {
+    expect(parseLine('I am *very* proud of this **outfit**.').text).toBe(
+      'I am very proud of this outfit.',
+    )
+  })
+
+  test('plain punctuation and numbers are untouched', () => {
+    expect(parseLine('Tier 2 needs 250 stars — 3.5 turns, maybe?').text).toBe(
+      'Tier 2 needs 250 stars — 3.5 turns, maybe?',
+    )
+  })
+})
+
 describe('parseLine images', () => {
   test('markdown images are pulled out of the spoken text', () => {
     const l = parseLine('Here you go! ![a cat](http://x/cat.png) [happy] Cute, right?')

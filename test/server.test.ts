@@ -382,6 +382,35 @@ describe('layout and scene', () => {
     expect((await post('/scene', { motion: { bpm: 'fast' } })).status).toBe(400)
     await post('/scene', { motion: { bpm: 0 } })
   })
+  test('POST /scene places widgets: boxes clamped, frames checked, broadcast and saved', async () => {
+    const page = await client()
+    await post('/scene', {
+      screen: { x: 0.75, y: 0.4, w: 0.5 },
+      captions: { y: 0.9, h: 0.3 },
+      frames: [
+        { url: 'http://niku:8300/overlay', x: 0.02, y: 0.5, w: 0.2, h: 0.45 },
+        { url: 'file:///etc/passwd' },
+      ],
+    })
+    const cue = await page.waitFor(
+      (m) => m.type === 'scene' && Array.isArray((m.scene as { frames?: unknown[] }).frames),
+    )
+    const scene = cue.scene as {
+      screen: { x: number; y: number; w: number; h: number; show: boolean }
+      captions: { y: number; h: number; size: number }
+      frames: { id: string; url: string }[]
+    }
+    expect(scene.screen.x + scene.screen.w).toBeLessThanOrEqual(1)
+    expect(scene.screen.w).toBe(0.5)
+    expect(scene.captions.y + scene.captions.h).toBeLessThanOrEqual(1)
+    expect(scene.captions.size).toBe(22)
+    expect(scene.frames.map((f) => f.url)).toEqual(['http://niku:8300/overlay'])
+    expect(readOverrides('test', overridesDir).scene?.frames).toHaveLength(1)
+    await post('/scene', { frames: [] })
+    expect((await get('/talent')).scene.frames).toEqual([])
+    expect((await post('/scene', { frames: 'nope' })).status).toBe(400)
+    page.close()
+  })
   test('POST /scene merges, broadcasts and persists', async () => {
     const page = await client()
     await post('/scene', { motion: { sway: 0.4 }, captions: { size: 30 } })
@@ -391,7 +420,7 @@ describe('layout and scene', () => {
       captions: { size: number; show: boolean }
     }
     expect(scene.motion).toEqual({ sway: 0.4, speed: 1, blink: 3.7, bpm: 0 })
-    expect(scene.captions).toEqual({ show: true, size: 30 })
+    expect(scene.captions).toMatchObject({ show: true, size: 30 })
     expect(readOverrides('test', overridesDir).scene?.motion?.sway).toBe(0.4)
     await post('/scene', { background: { color: '#123456' } })
     expect((await get('/talent')).scene.background.color).toBe('#123456')
@@ -680,12 +709,12 @@ describe('images', () => {
     })
     const cue = await page.waitFor((m) => m.type === 'scene')
     const sc = cue.scene as {
-      screen: { x: number; y: number; w: number }
+      screen: { x: number; y: number; w: number; h: number }
       background: { image: string }
     }
-    expect(sc.screen).toEqual({ x: 0.2, y: -0.15, w: 0.5 })
+    expect(sc.screen).toMatchObject({ x: 0.2, w: 0.5 })
     expect(sc.background.image).toBe('backgrounds/room.png')
-    await post('/scene', { screen: { x: 0, w: 0.4 }, background: { image: '' } })
+    await post('/scene', { screen: { x: 0.025, w: 0.4 }, background: { image: '' } })
     page.close()
   })
 })
