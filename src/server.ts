@@ -195,7 +195,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
     batcher = new ChatBatcher(
       { maxBatch: tw.max_batch, isBusy: () => isBusy() || twitchPaused },
       (lines, skipped) => {
-        runTurn(formatBatch(tw.channel, lines, skipped))
+        runTurn(formatBatch(tw.channel, lines, skipped, tw.note))
           .then((reply) => twitchReply && reply && twitch?.send(reply))
           .catch((e) => log(`twitch turn failed: ${e}`))
       },

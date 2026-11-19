@@ -75,8 +75,20 @@ const BATCH_HEADER =
   'Speak your reply aloud; you need not answer every line. (@you) marks lines that addressed you.'
 
 /** One egirl message for a batch of chat. Framing only; how the talent treats chat is persona. */
-export function formatBatch(channel: string, lines: ChatLine[], skipped: number): string {
+/**
+ * `note`: the talent's standing instruction for chat turns (twitch.note), after the lines. A small
+ * model follows an instruction next to the request far better than one in its system prompt:
+ * Niku answered every "draw ..." with her invite line and drew only once told, in the turn,
+ * to call her tool (2026-11-19).
+ */
+export function formatBatch(
+  channel: string,
+  lines: ChatLine[],
+  skipped: number,
+  note?: string,
+): string {
   const body = lines.map((l) => `${l.author}${l.mentioned ? ' (@you)' : ''}: ${l.text}`)
   if (skipped > 0) body.push(`(${skipped} earlier line${skipped === 1 ? '' : 's'} skipped)`)
-  return `[Twitch chat in #${channel}. ${BATCH_HEADER}]\n\n${body.join('\n')}`
+  const tail = note?.trim() ? `\n\n[${note.trim()}]` : ''
+  return `[Twitch chat in #${channel}. ${BATCH_HEADER}]\n\n${body.join('\n')}${tail}`
 }

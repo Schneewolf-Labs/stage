@@ -108,4 +108,9 @@ describe('formatBatch', () => {
     expect(out.endsWith('(4 earlier lines skipped)')).toBe(true)
     expect(formatBatch('c', [line('x')], 0)).not.toContain('skipped')
   })
+  test('a standing note goes after the lines, in brackets', () => {
+    const out = formatBatch('c', [line('draw a fox', true, 'birubawa')], 0, ' Draw it now. ')
+    expect(out.endsWith('\n\nbirubawa (@you): draw a fox\n\n[Draw it now.]')).toBe(true)
+    expect(formatBatch('c', [line('x')], 0, '  ')).not.toContain('[]')
+  })
 })

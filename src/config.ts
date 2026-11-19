@@ -14,6 +14,8 @@ export interface TwitchConfig {
   /** Also post what the talent says outside chat turns (director beats, /chat, /say): everything
    *  its captions show. Needs nick and token, like reply. */
   mirror?: boolean
+  /** A standing instruction added after every chat batch (batcher.formatBatch). */
+  note?: string
   wake_words: string[]
   interval_ms: number
   max_batch: number
@@ -116,11 +118,14 @@ function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
   if (typeof reply !== 'boolean') throw new Error(`${w}.reply must be a boolean`)
   const mirror = raw.mirror ?? false
   if (typeof mirror !== 'boolean') throw new Error(`${w}.mirror must be a boolean`)
+  const note = raw.note ?? ''
+  if (typeof note !== 'string') throw new Error(`${w}.note must be a string`)
   return {
     channel: str(raw, 'channel', w).toLowerCase().replace(/^#/, ''),
     ...(nick ? { nick, token } : {}),
     reply,
     ...(mirror ? { mirror } : {}),
+    ...(note.trim() ? { note: note.trim() } : {}),
     wake_words: strList(raw, 'wake_words', w, [name]),
     interval_ms: num(raw, 'interval_ms', 4000),
     max_batch: num(raw, 'max_batch', 6),
