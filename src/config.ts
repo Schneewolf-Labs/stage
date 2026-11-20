@@ -22,6 +22,25 @@ export interface TwitchConfig {
   ignore: string[]
 }
 
+export interface DiscordConfig {
+  /** The one channel Stage reads and posts in (an id: right-click the channel, Copy Channel ID). */
+  channel_id: string
+  /** How the channel is named to her in a chat batch ("Discord chat in #name"). */
+  name: string
+  /** Bot token. The bot needs the Message Content intent and Send Messages + Attach Files there. */
+  token: string
+  /** Post her replies to this channel's chat turns. */
+  reply: boolean
+  /** Post everything she says (beats, pictures, Twitch replies): the stream's captions. */
+  mirror: boolean
+  /** URL prefixes her pictures may be uploaded from (her image server); any other URL is left out. */
+  attach_from: string[]
+  note?: string
+  wake_words: string[]
+  interval_ms: number
+  max_batch: number
+}
+
 export interface TalentConfig {
   name: string
   /** Empty until resolved when the talent names its egirl in Wald instead. */
@@ -39,6 +58,7 @@ export interface TalentConfig {
   /** Respellings applied only to the text sent to TTS, e.g. { Bophades = "Bo-fay-deez" }. */
   say_as?: SayAs
   twitch?: TwitchConfig
+  discord?: DiscordConfig
 }
 
 export interface StageConfig {
@@ -133,6 +153,33 @@ function parseTwitch(raw: unknown, name: string): TwitchConfig | undefined {
   }
 }
 
+function parseDiscord(raw: unknown, name: string): DiscordConfig | undefined {
+  if (raw === undefined) return undefined
+  const w = `talents.${name}.discord`
+  if (!isObj(raw)) throw new Error(`${w} must be a table`)
+  const channel_id = str(raw, 'channel_id', w)
+  if (!/^\d+$/.test(channel_id)) throw new Error(`${w}.channel_id must be a channel id (digits)`)
+  const token = expand(str(raw, 'token', w))
+  if (!token) throw new Error(`${w}.token is empty (is its environment variable set?)`)
+  for (const k of ['reply', 'mirror'])
+    if (raw[k] !== undefined && typeof raw[k] !== 'boolean')
+      throw new Error(`${w}.${k} must be a boolean`)
+  const note = raw.note ?? ''
+  if (typeof note !== 'string') throw new Error(`${w}.note must be a string`)
+  return {
+    channel_id,
+    name: str(raw, 'name', w, 'discord').replace(/^#/, ''),
+    token,
+    reply: (raw.reply as boolean | undefined) ?? true,
+    mirror: (raw.mirror as boolean | undefined) ?? false,
+    attach_from: strList(raw, 'attach_from', w, []),
+    ...(note.trim() ? { note: note.trim() } : {}),
+    wake_words: strList(raw, 'wake_words', w, [name]).map((s) => s.toLowerCase()),
+    interval_ms: num(raw, 'interval_ms', 4000),
+    max_batch: num(raw, 'max_batch', 6),
+  }
+}
+
 export function parseConfig(text: string): StageConfig {
   const raw = parse(text)
   const server = isObj(raw.server) ? raw.server : {}
@@ -148,6 +195,7 @@ export function parseConfig(text: string): StageConfig {
     const token = typeof t.egirl_token === 'string' ? expand(t.egirl_token) : ''
     const rvc = typeof t.rvc === 'string' && t.rvc ? t.rvc : undefined
     const twitch = parseTwitch(t.twitch, name)
+    const discord = parseDiscord(t.discord, name)
     const say_as = parseSayAs(t.say_as, name)
     talents[name] = {
       name,
@@ -161,6 +209,7 @@ export function parseConfig(text: string): StageConfig {
       pitch: num(t, 'pitch', 0),
       ...(say_as ? { say_as } : {}),
       ...(twitch ? { twitch } : {}),
+      ...(discord ? { discord } : {}),
     }
   }
   if (Object.keys(talents).length === 0)

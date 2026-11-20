@@ -86,9 +86,10 @@ export function formatBatch(
   lines: ChatLine[],
   skipped: number,
   note?: string,
+  source = 'Twitch',
 ): string {
   const body = lines.map((l) => `${l.author}${l.mentioned ? ' (@you)' : ''}: ${l.text}`)
   if (skipped > 0) body.push(`(${skipped} earlier line${skipped === 1 ? '' : 's'} skipped)`)
   const tail = note?.trim() ? `\n\n[${note.trim()}]` : ''
-  return `[Twitch chat in #${channel}. ${BATCH_HEADER}]\n\n${body.join('\n')}${tail}`
+  return `[${source} chat in #${channel}. ${BATCH_HEADER}]\n\n${body.join('\n')}${tail}`
 }

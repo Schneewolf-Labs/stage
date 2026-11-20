@@ -137,6 +137,18 @@ up to `max_batch`, and egirl is told how many older lines were skipped. Without 
 `token` Stage reads anonymously; with them and `reply = true` the spoken reply is also posted to
 chat, cue tags stripped.
 
+## Discord Channel
+
+A `[talents.<name>.discord]` table makes one Discord channel a second chat beside Twitch: its
+messages are batched the same way (framed to egirl as "Discord chat in #name"), a reply to them
+is posted back with `reply`, and `mirror = true` posts everything the talent says there, Twitch
+replies and beats included, with her pictures uploaded as files. Pictures are only fetched from
+the URL prefixes in `attach_from` (her image server): a URL she was talked into writing is left
+out, so strangers cannot make Stage publish something else on the LAN. Posts never ping anyone.
+It is a bare gateway connection plus the REST API, no extra dependency. The bot needs the Message
+Content intent and Send Messages + Attach Files in that channel; if the same bot also runs as an
+egirl Discord instance, keep this channel out of that instance's `allowed_channels`.
+
 ## HTTP API
 
 | Method | Path | Body | Purpose |
@@ -154,6 +166,7 @@ chat, cue tags stripped.
 | POST | `/director` | `{enabled?, interval_s?, prompt?}` | the auto-prompt loop, saved; `/director/run` fires it once |
 | POST | `/image` | `{url, caption?, seconds?}` | show a picture on the screen area; `url: null` clears |
 | POST | `/twitch` | `{paused?, reply?}` | runtime chat toggles (400 without a twitch table) |
+| POST | `/discord` | `{paused?, reply?, mirror?}` | the same for the Discord channel (400 without a discord table) |
 | POST | `/transcribe[?send=1]` | WAV body | speech to text via the voice service; `send=1` runs it as a turn |
 | GET/POST | `/presets`, `/presets/apply`, `/presets/delete` | `{name}` | named layout snapshots |
 | POST | `/hotkeys`, `/hotkeys/fire` | `{hotkeys}` / `{key}` | console key bindings, saved; fire one by key |
@@ -202,6 +215,7 @@ src/
   server.ts     Bun.serve: page, models, clips, HTTP API, WebSocket
   egirl.ts      POST /chat stream consumer (SSE frames)
   twitch.ts     Twitch IRC over WebSocket: parse, filter, reconnect, optional reply
+  discord.ts    one Discord channel: gateway in, REST posts out (her pictures as uploads)
   batcher.ts    chat queue -> one egirl turn at a time
   chunker.ts    sentence splitter + cue-tag parser
   performer.ts  egirl events -> voice -> cues

@@ -6,6 +6,7 @@ import { ChatBatcher, formatBatch } from './batcher'
 import { SentenceChunker } from './chunker'
 import type { StageConfig, TalentConfig } from './config'
 import { startDirector } from './director'
+import { type DiscordHandle, startDiscord } from './discord'
 import {
   asks,
   brain,
@@ -185,10 +186,17 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
   let twitchPaused = false
   let twitchReply = talent.twitch?.reply ?? false
   let twitchMirror = talent.twitch?.mirror ?? false
-  // Everything she says outside a chat turn goes to chat too when mirror is on (a chat turn's
-  // reply is posted by the batcher below, under `reply`).
+  let discord: DiscordHandle | undefined
+  let discordBatcher: ChatBatcher | undefined
+  let discordPaused = false
+  let discordReply = talent.discord?.reply ?? false
+  let discordMirror = talent.discord?.mirror ?? false
+  // Everything she says outside a chat turn goes to the chats with mirror on (a chat turn's
+  // reply is posted by its batcher below, under `reply`, and mirrored to the other chat).
   const mirror = (text: string | undefined): void => {
-    if (twitchMirror && text?.trim()) twitch?.send(text)
+    if (!text?.trim()) return
+    if (twitchMirror) twitch?.send(text)
+    if (discordMirror) discord?.post(text)
   }
   if (talent.twitch) {
     const tw = talent.twitch
@@ -196,7 +204,11 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
       { maxBatch: tw.max_batch, isBusy: () => isBusy() || twitchPaused },
       (lines, skipped) => {
         runTurn(formatBatch(tw.channel, lines, skipped, tw.note))
-          .then((reply) => twitchReply && reply && twitch?.send(reply))
+          .then((reply) => {
+            if (!reply) return
+            if (twitchReply) twitch?.send(reply)
+            if (discordMirror) discord?.post(reply)
+          })
           .catch((e) => log(`twitch turn failed: ${e}`))
       },
     )
@@ -210,6 +222,31 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
       log,
     })
     setInterval(() => b.tick(), tw.interval_ms)
+  }
+  if (talent.discord) {
+    const dc = talent.discord
+    discordBatcher = new ChatBatcher(
+      { maxBatch: dc.max_batch, isBusy: () => isBusy() || discordPaused },
+      (lines, skipped) => {
+        runTurn(formatBatch(dc.name, lines, skipped, dc.note, 'Discord'))
+          .then((reply) => {
+            if (!reply) return
+            if (discordReply || discordMirror) discord?.post(reply)
+            if (twitchMirror) twitch?.send(reply)
+          })
+          .catch((e) => log(`discord turn failed: ${e}`))
+      },
+    )
+    const b = discordBatcher
+    discord = startDiscord({
+      cfg: dc,
+      onLine: (l) => {
+        b.add(l)
+        stage.event({ type: 'chat', ...l })
+      },
+      log,
+    })
+    setInterval(() => b.tick(), dc.interval_ms)
   }
 
   const presetName = (v: unknown): string | undefined =>
@@ -271,6 +308,18 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
           },
         }
       : {}),
+    ...(discord && discordBatcher
+      ? {
+          discord: {
+            ...discord.stats(),
+            queued: discordBatcher.size,
+            dropped: discordBatcher.dropped,
+            paused: discordPaused,
+            reply: discordReply,
+            mirror: discordMirror,
+          },
+        }
+      : {}),
   })
 
   const server = Bun.serve<unknown>({
@@ -305,6 +354,7 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             ...talentEvent(),
             talents: Object.keys(cfg.talents),
             twitch: !!talent.twitch,
+            discord: !!talent.discord,
           })
         if (path === '/egirl') return json(await brain(talent))
         if (path === '/egirl/asks') return passThrough(await asks(talent))
@@ -505,6 +555,22 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             `twitch: ${twitchPaused ? 'paused' : 'listening'}, replies ${twitchReply ? 'on' : 'off'}, mirror ${twitchMirror ? 'on' : 'off'}`,
           )
           return json({ ok: true, paused: twitchPaused, reply: twitchReply, mirror: twitchMirror })
+        }
+        if (path === '/discord') {
+          if (!discord || !discordBatcher)
+            return json({ error: 'this talent has no [discord] table' }, 400)
+          if (typeof body.paused === 'boolean') discordPaused = body.paused
+          if (typeof body.reply === 'boolean') discordReply = body.reply
+          if (typeof body.mirror === 'boolean') discordMirror = body.mirror
+          log(
+            `discord: ${discordPaused ? 'paused' : 'listening'}, replies ${discordReply ? 'on' : 'off'}, mirror ${discordMirror ? 'on' : 'off'}`,
+          )
+          return json({
+            ok: true,
+            paused: discordPaused,
+            reply: discordReply,
+            mirror: discordMirror,
+          })
         }
         if (path === '/presets') {
           const name = presetName(body.name)

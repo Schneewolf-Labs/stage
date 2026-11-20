@@ -52,6 +52,17 @@ interval_ms = 4000                 # how often queued chat is considered for a t
 max_batch = 6                      # most lines sent to egirl per turn; older extras are skipped
 ignore = ["nightbot", "streamelements"]
 
+# One Discord channel as a second chat: messages there reach her like Twitch chat; mirror posts
+# everything she says (and her pictures) there too.
+# [talents.springfield.discord]
+# channel_id = "1156996056748400700"   # right-click the channel, Copy Channel ID
+# name = "springfield-live"             # how the channel is named to her
+# token = "$DISCORD_TOKEN"              # bot token; needs the Message Content intent
+# reply = true                          # post her replies to this channel's chat
+# mirror = true                         # post everything she says, pictures uploaded
+# attach_from = ["http://127.0.0.1:8300/images/"]   # only pictures from here are uploaded
+# wake_words = ["springfield"]
+
 [talents.kira]
 egirl_url = "http://127.0.0.1:3000"
 egirl_token = "$EGIRL_API_TOKEN"
