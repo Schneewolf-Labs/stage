@@ -544,6 +544,9 @@ export function startServer({ cfg, talent, log: baseLog, overridesDir = DIR }: D
             ...(typeof body.seconds === 'number' ? { seconds: body.seconds } : {}),
           }
           stage.cue(cue)
+          // A picture put on screen goes to the Discord channel too (uploaded only from
+          // attach_from, like any picture she posts there).
+          if (discordMirror && cue.url) discord?.post(`${cue.caption ?? ''} ![picture](${cue.url})`)
           return json({ ok: true })
         }
         if (path === '/twitch') {

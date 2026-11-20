@@ -79,6 +79,15 @@ describe('toPost', () => {
       'http://192.168.8.217:8300/images/two.png',
     ])
     expect(toPost('![x](http://evil/a.png)', []).images).toEqual([])
+    // what POST /image posts: the caption, and the picture as a file
+    const shown = toPost(
+      'for Biru ![picture](http://192.168.8.217:8300/images/f.png)',
+      cfg.attach_from,
+    )
+    expect(shown).toEqual({
+      content: 'for Biru',
+      images: ['http://192.168.8.217:8300/images/f.png'],
+    })
   })
 
   test('long lines stop under the 2000-character cap', () => {

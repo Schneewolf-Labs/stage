@@ -142,7 +142,8 @@ chat, cue tags stripped.
 A `[talents.<name>.discord]` table makes one Discord channel a second chat beside Twitch: its
 messages are batched the same way (framed to egirl as "Discord chat in #name"), a reply to them
 is posted back with `reply`, and `mirror = true` posts everything the talent says there, Twitch
-replies and beats included, with her pictures uploaded as files. Pictures are only fetched from
+replies and beats included, with her pictures uploaded as files; a picture put on screen with
+`POST /image` is posted too, its caption as the text. Pictures are only fetched from
 the URL prefixes in `attach_from` (her image server): a URL she was talked into writing is left
 out, so strangers cannot make Stage publish something else on the LAN. Posts never ping anyone.
 It is a bare gateway connection plus the REST API, no extra dependency. The bot needs the Message
